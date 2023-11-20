@@ -500,6 +500,16 @@
             "title": "Deprecated ManagedForm type",
             "$id": "#/definitions/DeprecatedTypeManagedForm"
         },
+        "DisableSafeModeForExternalDataProcessors": {
+            "description": "Disable safe mode for external data processors, reports for SSL",
+            "default": true,
+            "type": [
+                "boolean",
+                "object"
+            ],
+            "title": "Disable safe mode for external data processors, reports for SSL",
+            "$id": "#/definitions/DisableSafeModeForExternalDataProcessors"
+        },
         "DuplicateRegion": {
             "description": "Duplicate regions",
             "default": true,
