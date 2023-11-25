@@ -31,6 +31,7 @@ import com.github._1c_syntax.bsl.languageserver.references.ReferenceIndex;
 import com.github._1c_syntax.bsl.languageserver.utils.Ranges;
 import com.github._1c_syntax.bsl.parser.BSLParser;
 import com.github._1c_syntax.bsl.parser.BSLParserRuleContext;
+import com.github._1c_syntax.bsl.types.ModuleType;
 import com.github._1c_syntax.utils.CaseInsensitivePattern;
 import org.antlr.v4.runtime.tree.ParseTree;
 import org.jetbrains.annotations.NotNull;
@@ -45,6 +46,10 @@ import java.util.regex.Pattern;
 @DiagnosticMetadata(
   type = DiagnosticType.VULNERABILITY,
   severity = DiagnosticSeverity.MAJOR,
+  modules = {
+    ModuleType.ObjectModule,
+    ModuleType.UNKNOWN
+  },
   minutesToFix = 5,
   tags = {
     DiagnosticTag.SUSPICIOUS
