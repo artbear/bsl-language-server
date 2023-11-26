@@ -64,36 +64,16 @@ public class DisableSafeModeForExternalDataProcessorsDiagnostic extends Abstract
   private static final String SAFE_MODE_PARAMETER = "БЕЗОПАСНЫЙРЕЖИМ";
   private static final String SAFE_MODE_PARAMETER_WITH_QUOTES = "\"" + SAFE_MODE_PARAMETER + "\"";
   private static final Pattern INSERT_METHOD_PATTERN = CaseInsensitivePattern.compile("вставить|insert");
+  private static final Pattern ADD_INSERT_METHOD_PATTERN = CaseInsensitivePattern.compile("add|добавить|вставить|insert");
+  private static final Pattern PERMISSIONS_PATTERN = CaseInsensitivePattern.compile("разрешения");
+
   private final ReferenceIndex referenceIndex;
-  private final Map<String, List<BSLParserRuleContext>> nodes = new HashMap<>();
+  private final Map<String, List<BSLParserRuleContext>> safeModeUnsetNodes = new HashMap<>();
   private MethodSymbol methodSymbol;
-  private Optional<String> mainCollection = Optional.empty();
+  private String returnedVariableNameFromMainMethod = "";
 
   public DisableSafeModeForExternalDataProcessorsDiagnostic(ReferenceIndex referenceIndex) {
     this.referenceIndex = referenceIndex;
-  }
-
-  private static boolean isFalseExpression(Optional<BSLParser.ExpressionContext> expressionContext) {
-    return expressionContext
-      .map(BSLParser.ExpressionContext::member)
-      .filter(memberContexts -> !memberContexts.isEmpty())
-      .map(memberContexts -> memberContexts.get(0))
-      .map(BSLParser.MemberContext::constValue)
-      .map(BSLParser.ConstValueContext::FALSE)
-      .isPresent();
-  }
-
-  private static boolean haveSafeModeText(BSLParser.CallParamContext callParamContext) {
-    return Optional.of(callParamContext)
-      .map(BSLParser.CallParamContext::expression)
-      .map(BSLParser.ExpressionContext::member)
-      .filter(memberContexts -> !memberContexts.isEmpty())
-      .map(memberContexts -> memberContexts.get(0))
-      .map(BSLParser.MemberContext::constValue)
-      .map(BSLParser.ConstValueContext::string)
-      .map(BSLParserRuleContext::getText)
-      .filter(name -> name.equalsIgnoreCase(SAFE_MODE_PARAMETER_WITH_QUOTES))
-      .isPresent();
   }
 
   @Override
@@ -116,9 +96,9 @@ public class DisableSafeModeForExternalDataProcessorsDiagnostic extends Abstract
       return;
     }
 
-    super.visitFile(ctx); // вычисляю имя возвращаемой переменной в mainCollectionName
-    if (mainCollection.isPresent() && !nodes.isEmpty()) {
-      nodes.get(mainCollection.get())
+    super.visitFile(ctx); // вычисляю имя возвращаемой переменной в returnedVariablesFromMainMethod
+    if (!returnedVariableNameFromMainMethod.isEmpty() && !safeModeUnsetNodes.isEmpty()) {
+      safeModeUnsetNodes.get(returnedVariableNameFromMainMethod)
         .forEach(diagnosticStorage::addDiagnostic);
     }
   }
@@ -132,15 +112,16 @@ public class DisableSafeModeForExternalDataProcessorsDiagnostic extends Abstract
 
   @Override
   public ParseTree visitFunction(BSLParser.FunctionContext ctx) {
-    // TODO проверить на вхождение range плюс или минус 1
-    if (Ranges.containsRange(methodSymbol.getRange(), Ranges.create(ctx)) &&
-      Optional.ofNullable(ctx.funcDeclaration())
+    if (Ranges.containsRange(methodSymbol.getRange(), Ranges.create(ctx))) {
+      final var isMainFunction = Optional.ofNullable(ctx.funcDeclaration())
         .map(BSLParser.FuncDeclarationContext::subName)
         .map(BSLParser.SubNameContext::IDENTIFIER)
         .map(ParseTree::getText)
         .filter(s -> s.equalsIgnoreCase(MAIN_METHOD_NAME))
-        .isPresent()) {
-      return super.visitFunction(ctx);
+        .isPresent();
+      if (isMainFunction) {
+        return super.visitFunction(ctx);
+      }
     }
     return null;  // нет смысла анализировать другие методы
   }
@@ -152,15 +133,17 @@ public class DisableSafeModeForExternalDataProcessorsDiagnostic extends Abstract
 
   @Override
   public ParseTree visitReturnStatement(BSLParser.ReturnStatementContext ctx) {
-    // TODO проверить на вхождение range плюс или минус 1
-    if (mainCollection.isEmpty() && Ranges.containsRange(methodSymbol.getRange(), Ranges.create(ctx))) {
-      mainCollection = Optional.ofNullable(ctx.expression())
+    if (returnedVariableNameFromMainMethod.isEmpty()
+      && Ranges.containsRange(methodSymbol.getRange(), Ranges.create(ctx))) {
+
+      returnedVariableNameFromMainMethod = Optional.ofNullable(ctx.expression())
         .map(BSLParser.ExpressionContext::member)
         .filter(memberContexts -> !memberContexts.isEmpty())
         .map(memberContexts -> memberContexts.get(0))
         .map(BSLParser.MemberContext::complexIdentifier)
         .map(BSLParser.ComplexIdentifierContext::IDENTIFIER)
-        .map(ParseTree::getText);
+        .map(ParseTree::getText)
+        .orElse("");
     }
     return null; //нет смысла идти глубже
   }
@@ -185,7 +168,7 @@ public class DisableSafeModeForExternalDataProcessorsDiagnostic extends Abstract
       .filter(terminalNode1 -> terminalNode1.getText().equalsIgnoreCase(SAFE_MODE_PARAMETER));
 
     if (terminalNodeSafeMode.isPresent() && isFalseExpression(Optional.ofNullable(ctx.expression()))) {
-      nodes.computeIfAbsent(varName.get(), name -> new ArrayList<>()).add(ctx);
+      safeModeUnsetNodes.computeIfAbsent(varName.get(), name -> new ArrayList<>()).add(ctx);
     }
   }
 
@@ -202,14 +185,47 @@ public class DisableSafeModeForExternalDataProcessorsDiagnostic extends Abstract
       return;
     }
 
-    final var methodCallContext = Optional.of(ctx)
-      .map(BSLParser.CallStatementContext::accessCall)
-      .map(BSLParser.AccessCallContext::methodCall);
-    final var methodNameContext = methodCallContext
-      .map(BSLParser.MethodCallContext::methodName)
-      .filter(methodName -> INSERT_METHOD_PATTERN.matcher(methodName.getText()).matches());
-    if (methodNameContext.isEmpty()) {
+    final var callContext = Optional.of(ctx);
+    if (isPermissionAdding(callContext)) {
+      safeModeUnsetNodes.computeIfAbsent(varName.get(), name -> new ArrayList<>()).add(ctx);
       return;
+    }
+
+    if (isSafeModeUnsetCalling(callContext)) {
+      safeModeUnsetNodes.computeIfAbsent(varName.get(), name -> new ArrayList<>()).add(ctx);
+    }
+  }
+
+  private static boolean isFalseExpression(Optional<BSLParser.ExpressionContext> expressionContext) {
+    return expressionContext
+      .map(BSLParser.ExpressionContext::member)
+      .filter(memberContexts -> !memberContexts.isEmpty())
+      .map(memberContexts -> memberContexts.get(0))
+      .map(BSLParser.MemberContext::constValue)
+      .map(BSLParser.ConstValueContext::FALSE)
+      .isPresent();
+  }
+
+  private static boolean isPermissionAdding(Optional<BSLParser.CallStatementContext> callContext) {
+    final var isPermissionReferenced = callContext
+      .map(BSLParser.CallStatementContext::modifier)
+      .filter(modifierContexts -> !modifierContexts.isEmpty())
+      .map(modifierContexts -> modifierContexts.get(0))
+      .map(BSLParser.ModifierContext::accessProperty)
+      .map(BSLParser.AccessPropertyContext::IDENTIFIER)
+      .filter(terminalNode -> PERMISSIONS_PATTERN.matcher(terminalNode.getText()).matches())
+      .isPresent();
+    if (!isPermissionReferenced) {
+      return false;
+    }
+    return getMethodCallContext(callContext, ADD_INSERT_METHOD_PATTERN)
+      .isPresent();
+  }
+
+  private static boolean isSafeModeUnsetCalling(Optional<BSLParser.CallStatementContext> callContext) {
+    final var methodCallContext = getMethodCallContext(callContext, INSERT_METHOD_PATTERN);
+    if (methodCallContext.isEmpty()) {
+      return false;
     }
     final var expressionContext = methodCallContext
       .map(BSLParser.MethodCallContext::doCall)
@@ -220,8 +236,32 @@ public class DisableSafeModeForExternalDataProcessorsDiagnostic extends Abstract
       .map(callParamContexts -> callParamContexts.get(1))
       .map(BSLParser.CallParamContext::expression);
 
-    if (isFalseExpression(expressionContext)) {
-      nodes.computeIfAbsent(varName.get(), name -> new ArrayList<>()).add(ctx);
+    return isFalseExpression(expressionContext);
+  }
+
+  private static Optional<BSLParser.MethodCallContext> getMethodCallContext(Optional<BSLParser.CallStatementContext> callContext, Pattern insertMethodPattern) {
+    final var methodCallContext = callContext
+      .map(BSLParser.CallStatementContext::accessCall)
+      .map(BSLParser.AccessCallContext::methodCall);
+    final var methodNameContext = methodCallContext
+      .map(BSLParser.MethodCallContext::methodName)
+      .filter(methodName -> insertMethodPattern.matcher(methodName.getText()).matches());
+    if (methodNameContext.isEmpty()) {
+      return Optional.empty();
     }
+    return methodCallContext;
+  }
+
+  private static boolean haveSafeModeText(BSLParser.CallParamContext callParamContext) {
+    return Optional.of(callParamContext)
+      .map(BSLParser.CallParamContext::expression)
+      .map(BSLParser.ExpressionContext::member)
+      .filter(memberContexts -> !memberContexts.isEmpty())
+      .map(memberContexts -> memberContexts.get(0))
+      .map(BSLParser.MemberContext::constValue)
+      .map(BSLParser.ConstValueContext::string)
+      .map(BSLParserRuleContext::getText)
+      .filter(name -> name.equalsIgnoreCase(SAFE_MODE_PARAMETER_WITH_QUOTES))
+      .isPresent();
   }
 }

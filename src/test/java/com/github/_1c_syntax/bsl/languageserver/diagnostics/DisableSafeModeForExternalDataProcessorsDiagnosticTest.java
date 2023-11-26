@@ -41,6 +41,8 @@ class DisableSafeModeForExternalDataProcessorsDiagnosticTest extends AbstractDia
     assertThat(diagnostics, true)
       .hasRange(5, 4, 47)
       .hasRange(7, 4, 58)
-      .hasSize(2);
+      .hasRange(12, 4, 56)
+      .hasRange(13, 4, 59)
+      .hasSize(4);
   }
 }
