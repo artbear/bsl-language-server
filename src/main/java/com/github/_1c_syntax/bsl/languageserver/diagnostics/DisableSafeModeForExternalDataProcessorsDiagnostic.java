@@ -85,8 +85,7 @@ public class DisableSafeModeForExternalDataProcessorsDiagnostic extends Abstract
 
   public void processFile(BSLParser.FileContext ctx) {
     final var mainMethodSymbol = getMainMethodSymbol();
-    if (mainMethodSymbol
-      .isEmpty()) {
+    if (mainMethodSymbol.isEmpty()) {
       return;
     }
     methodSymbol = mainMethodSymbol.get();
@@ -112,7 +111,7 @@ public class DisableSafeModeForExternalDataProcessorsDiagnostic extends Abstract
 
   @Override
   public ParseTree visitFunction(BSLParser.FunctionContext ctx) {
-    if (Ranges.containsRange(methodSymbol.getRange(), Ranges.create(ctx))) {
+    if (Ranges.containsRange(methodSymbol.getRange(), Ranges.create(ctx.subCodeBlock()))) {
       final var isMainFunction = Optional.ofNullable(ctx.funcDeclaration())
         .map(BSLParser.FuncDeclarationContext::subName)
         .map(BSLParser.SubNameContext::IDENTIFIER)
