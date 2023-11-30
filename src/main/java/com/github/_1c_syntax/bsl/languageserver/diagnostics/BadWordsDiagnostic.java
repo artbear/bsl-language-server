@@ -88,7 +88,7 @@ public class BadWordsDiagnostic extends AbstractDiagnostic {
   private void checkLinesWithoutComments(String[] moduleLines) {
     final var nclocData = documentContext.getMetrics().getNclocData();
     for (int i : nclocData) {
-      final var moduleNumber = i - 1; // т.к. в токенах нумерация строк с 1, а в moduleLines с 0
+      final var moduleNumber = i - 1; // т.к. в токенах и метриках нумерация строк с 1, а в moduleLines с 0
       checkLine(moduleLines, moduleNumber);
     }
   }
