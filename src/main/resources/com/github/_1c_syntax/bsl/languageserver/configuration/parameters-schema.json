@@ -1906,6 +1906,16 @@
             "title": "Incorrect use of the method \"WriteLogEvent\"",
             "$id": "#/definitions/UsageWriteLogEvent"
         },
+        "UsageWriteLogEventWhenProcessingException": {
+            "description": "Using \"WriteLogEvent\" inside the block \"Exception\"",
+            "default": true,
+            "type": [
+                "boolean",
+                "object"
+            ],
+            "title": "Using \"WriteLogEvent\" inside the block \"Exception\"",
+            "$id": "#/definitions/UsageWriteLogEventWhenProcessingException"
+        },
         "UseLessForEach": {
             "description": "Useless collection iteration",
             "default": true,
