@@ -31,7 +31,9 @@ import com.github._1c_syntax.bsl.languageserver.diagnostics.metadata.DiagnosticT
 import com.github._1c_syntax.bsl.languageserver.references.ReferenceIndex;
 import com.github._1c_syntax.bsl.languageserver.references.model.Reference;
 import com.github._1c_syntax.bsl.languageserver.utils.Ranges;
+import com.github._1c_syntax.bsl.languageserver.utils.Trees;
 import com.github._1c_syntax.bsl.parser.BSLParser;
+import com.github._1c_syntax.bsl.parser.BSLParserRuleContext;
 import com.github._1c_syntax.utils.CaseInsensitivePattern;
 import org.antlr.v4.runtime.tree.ParseTree;
 import org.eclipse.lsp4j.Range;
@@ -42,6 +44,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.function.Predicate;
 import java.util.regex.Pattern;
@@ -62,13 +65,19 @@ public class UsageWriteLogEventWhenProcessingExceptionDiagnostic extends Abstrac
   private static final Pattern WRITELOGEVENT = CaseInsensitivePattern.compile(
     "записьжурналарегистрации|writelogevent"
   );
+  public static final List<Integer> RULE_METHOD_CALL = List.of(BSLParser.RULE_methodCall);
+  private static final Set<Integer> rootsForRaiseStatement = Set.of(
+    BSLParser.RULE_exceptCodeBlock, BSLParser.RULE_procedure, BSLParser.RULE_function, BSLParser.RULE_fileCodeBlock);
   private final ReferenceIndex referenceIndex;
   private final Set<String> methodsWithRequiredCall = new HashSet<>();
   private final List<CodeBlockData> blocksForChecking = new ArrayList<>();
   //  private boolean insideException;
-  private boolean hasRequiredCallInsideExceptBlock;
+  private boolean hasRightCallInsideExceptionBlock;
+  private boolean hasRaiseInsideExceptionBlock;
   private String currentMethodName;
-  private List<Reference> referenceToMethodCalls = Collections.emptyList();
+  private List<Reference> referencesToMethodCall = Collections.emptyList();
+  private Optional<Range> currentExceptionBlockContext = Optional.empty();
+  // TODO обработать все TODO из bsl-файла
 
   public UsageWriteLogEventWhenProcessingExceptionDiagnostic(ReferenceIndex referenceIndex) {
     this.referenceIndex = referenceIndex;
@@ -94,39 +103,56 @@ public class UsageWriteLogEventWhenProcessingExceptionDiagnostic extends Abstrac
     return super.visitFunction(ctx);
   }
 
+  private static boolean hasAnyObjectMethodCallInside(BSLParserRuleContext ctx) {
+    return !Trees.findAllTopLevelDescendantNodes(ctx, RULE_METHOD_CALL)
+      .isEmpty();
+  }
+
   @Override
   public ParseTree visitExceptCodeBlock(BSLParser.ExceptCodeBlockContext ctx) {
 //    insideException = true; // для отбрасывания ненужных узлов
-    hasRequiredCallInsideExceptBlock = false;
+    hasRightCallInsideExceptionBlock = false;
+    hasRaiseInsideExceptionBlock = false;
+    currentExceptionBlockContext = Optional.of(Ranges.create(ctx));
 
     // TODO проверить вложенные блоки Попытка-Попытка-Исключение-КонецПопытки-Исключение-КонецПопытки
     super.visitExceptCodeBlock(ctx); // обработка всех вложенных вызовов
 //    insideException = false;
+    currentExceptionBlockContext = Optional.empty();
 
-    if (!hasRequiredCallInsideExceptBlock) {
-      if (!hasRequiredCallInsideMethods(Ranges.create(ctx))) {
-        fireIssue(ctx);
+    if (!hasRightCallInsideExceptionBlock && !hasRaiseInsideExceptionBlock) {
+      if (hasNoneGlobalMethodCallInside(Ranges.create(ctx))) {
+        if (!isTryBlockSimple(ctx)) {
+          fireIssue(ctx);
+        }
       } else {
-        blocksForChecking.add(new CodeBlockData(documentContext, ctx, getReferenceToMethodCalls()));
+        blocksForChecking.add(new CodeBlockData(documentContext, ctx, getReferencesToMethodCall()));
       }
-      hasRequiredCallInsideExceptBlock = false;
+      //hasRequiredCallInsideExceptionBlock = false;
     }
 
     return super.defaultResult(); // внутрь вызова уже сходили
   }
 
-  private boolean hasRequiredCallInsideMethods(Range range) {
-    return getReferenceToMethodCalls().stream()
-      .anyMatch(reference -> Ranges.containsRange(range, reference.getSelectionRange()));
-  }
-
-  private List<Reference> getReferenceToMethodCalls() {
-    if (referenceToMethodCalls.isEmpty()) {
-      referenceToMethodCalls = referenceIndex.getReferencesFrom(documentContext.getUri()).stream()
+  private List<Reference> getReferencesToMethodCall() {
+    if (referencesToMethodCall.isEmpty()) {
+      referencesToMethodCall = referenceIndex.getReferencesFrom(documentContext.getUri()).stream()
         .filter(reference -> isMethodSymbol(reference.getSymbol()))
         .collect(Collectors.toList());
     }
-    return referenceToMethodCalls;
+    return referencesToMethodCall;
+  }
+
+  private boolean isTryBlockSimple(BSLParser.ExceptCodeBlockContext ctx) {
+    final var tryStatementContext = (BSLParser.TryStatementContext) ctx.getParent();
+    final var codeBlock = tryStatementContext.tryCodeBlock().codeBlock();
+    final var tryCodeBlockRange = Ranges.create(codeBlock);
+    return hasNoneGlobalMethodCallInside(tryCodeBlockRange) && !hasAnyObjectMethodCallInside(codeBlock);
+  }
+
+  private boolean hasNoneGlobalMethodCallInside(Range range) {
+    return getReferencesToMethodCall().stream()
+      .noneMatch(reference -> Ranges.containsRange(range, reference.getSelectionRange()));
   }
 
   private void fireIssue(BSLParser.ExceptCodeBlockContext ctx) {
@@ -135,9 +161,30 @@ public class UsageWriteLogEventWhenProcessingExceptionDiagnostic extends Abstrac
   }
 
   @Override
+  public ParseTree visitRaiseStatement(BSLParser.RaiseStatementContext ctx) {
+    handleExceptions(Trees.getRootParent(ctx, rootsForRaiseStatement));
+    return super.defaultResult();
+  }
+
+  @Override
+  public ParseTree visitReturnStatement(BSLParser.ReturnStatementContext ctx) {
+    handleExceptions(Trees.getRootParent(ctx, rootsForRaiseStatement));
+    return super.defaultResult();
+  }
+
+  private void handleExceptions(BSLParserRuleContext ctx) {
+    var insideException = currentExceptionBlockContext
+      .filter(exceptBlockContext -> Ranges.compare(Ranges.create(ctx), exceptBlockContext) == 0)
+      .isPresent();
+    if (insideException) {
+      hasRaiseInsideExceptionBlock = true;
+    }
+  }
+
+  @Override
   public ParseTree visitGlobalMethodCall(BSLParser.GlobalMethodCallContext context) {
-    if (!hasRequiredCallInsideExceptBlock && isRightMethod(context)) {
-      hasRequiredCallInsideExceptBlock = true;
+    if (!hasRightCallInsideExceptionBlock && isRightMethod(context)) {
+      hasRightCallInsideExceptionBlock = true;
       methodsWithRequiredCall.add(currentMethodName);
     }
     return super.defaultResult(); // внутрь вызова нет смысла идти
@@ -151,9 +198,10 @@ public class UsageWriteLogEventWhenProcessingExceptionDiagnostic extends Abstrac
 
     blocksForChecking.forEach(this::checkCodeBlock);
 
-    referenceToMethodCalls = Collections.emptyList();
+    referencesToMethodCall = Collections.emptyList();
     blocksForChecking.clear();
     methodsWithRequiredCall.clear();
+    currentExceptionBlockContext = Optional.empty();
 
     return super.defaultResult();
   }

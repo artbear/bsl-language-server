@@ -21,10 +21,13 @@
  */
 package com.github._1c_syntax.bsl.languageserver.diagnostics;
 
+import com.github._1c_syntax.bsl.languageserver.util.TestUtils;
+import com.github._1c_syntax.bsl.languageserver.utils.Ranges;
 import org.eclipse.lsp4j.Diagnostic;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.stream.Collectors;
 
 import static com.github._1c_syntax.bsl.languageserver.util.Assertions.assertThat;
 
@@ -36,7 +39,9 @@ class UsageWriteLogEventWhenProcessingExceptionDiagnosticTest extends AbstractDi
   @Test
   void test() {
 
-    List<Diagnostic> diagnostics = getDiagnostics();
+    List<Diagnostic> diagnostics = getDiagnostics().stream()
+      .sorted((o1, o2) -> Ranges.compare(o1.getRange(), o2.getRange()))
+      .collect(Collectors.toList());
 
     assertThat(diagnostics, true)
       .hasRange(4, 4, 16)
@@ -44,7 +49,104 @@ class UsageWriteLogEventWhenProcessingExceptionDiagnosticTest extends AbstractDi
       .hasRange(36, 4, 16)
       .hasRange(50, 4, 16)
       .hasRange(79, 4, 16)
-      .hasSize(5)
+      .hasRange(156, 8, 20)
+      .hasRange(166, 8, 20)
+      .hasSize(7)
     ;
+  }
+
+  // TODO удалить все тесты для строк, оставить только общий тест всего файла
+  @Test
+  void testEmptyExceptionBlock() {
+
+    var code = "Процедура Тест1()\n" +
+      "    Попытка\n" +
+      "        Объект.Записать();\n" +
+      "    Исключение\n" +
+      "    КонецПопытки; // замечание\n" +
+      "КонецПроцедуры\n";
+
+    final var documentContext = TestUtils.getDocumentContext(code);
+    List<Diagnostic> diagnostics = getDiagnostics(documentContext);
+
+    assertThat(diagnostics, true)
+      .hasSize(1);
+  }
+
+  @Test
+  void testRaiseInsideExceptBlock() {
+
+    var code = "Процедура Тест9()\n" +
+      "    СтрокаXML = \"\";\n" +
+      "    Попытка\n" +
+      "        СтрокаXML = НастройкиПодключенияВXML(НастройкиПодключения);\n" +
+      "    Исключение\n" +
+      "        Возврат;\n" +
+      "    КонецПопытки; // нет замечания\n" +
+      "КонецПроцедуры\n";
+
+    final var documentContext = TestUtils.getDocumentContext(code);
+    List<Diagnostic> diagnostics = getDiagnostics(documentContext);
+
+    assertThat(diagnostics, true).isEmpty();
+  }
+
+  @Test
+  void testSimpleCodeInsideTry() {
+
+    var code = "Процедура Тест1()\n" +
+      "    //Попытка\n" +
+      "        Объект.Записать();\n" +
+      "    //Исключение\n" +
+      "    //КонецПопытки; // замечание\n" +
+      "КонецПроцедуры\n" +
+      "\n" +
+      "Процедура Тест2()\n" +
+      "    //Попытка\n" +
+      "        Объект.Записать();\n" +
+      "    //Исключение\n" +
+      "        Отказ = Истина;\n" +
+      "        ОписаниеОшибки = ОписаниеОшибки();\n" +
+      "    //КонецПопытки; // замечание\n" +
+      "КонецПроцедуры\n" +
+      "Процедура Тест12()\n" +
+      "    Попытка\n" +
+      "        СписокРеквизит = Форма.Список;\n" +
+      "    Исключение\n" +
+      "        СписокРеквизит = Неопределено;\n" +
+      "    КонецПопытки; // TODO стоит игнорировать подобные простые вызовы без вызова любых неплатформенных методов? можно опцию сделать\n" +
+      "\n" +
+      "    Попытка\n" +
+      "        НаЧтоЗаменить = ?(ВырезатьОбрамление, \"\", НачалоПараметра) + Формат(КлючИЗначение.Значение, ФорматнаяСтрока) + ?(ВырезатьОбрамление, \"\", КонецПараметра);\n" +
+      "    Исключение\n" +
+      "        НаЧтоЗаменить = ?(ВырезатьОбрамление, \"\", НачалоПараметра) + КлючИЗначение.Значение + ?(ВырезатьОбрамление, \"\", КонецПараметра);\n" +
+      "    КонецПопытки; // TODO стоит игнорировать подобные простые вызовы без вызова любых неплатформенных методов? можно опцию сделать\n" +
+      "КонецПроцедуры\n";
+
+    final var documentContext = TestUtils.getDocumentContext(code);
+    List<Diagnostic> diagnostics = getDiagnostics(documentContext);
+
+    assertThat(diagnostics, true).isEmpty();
+  }
+
+  @Test
+  void testRaiseInsideMethodCalledFromExceptBlock() {
+
+    var code = "Процедура НеУдалосьСформироватьПечатнуюФорму_Тест15(ИнформацияОбОшибке)\n" +
+      "    ВызватьИсключение ИнформацияОбОшибке;\n" +
+      "КонецПроцедуры\n" +
+      "\n" +
+      "Процедура Тест15()\n" +
+      "    Попытка\n" +
+      "        COMОбъект = Новый COMОбъект(\"Word.Application\");\n" +
+      "    Исключение\n" +
+      "        НеУдалосьСформироватьПечатнуюФорму_Тест15(ИнформацияОбОшибке());\n" +
+      "    КонецПопытки; // TODO нет замечания\n" +
+      "КонецПроцедуры\n";
+
+    final var documentContext = TestUtils.getDocumentContext(code);
+    List<Diagnostic> diagnostics = getDiagnostics(documentContext);
+
+    assertThat(diagnostics, true).isEmpty();
   }
 }
