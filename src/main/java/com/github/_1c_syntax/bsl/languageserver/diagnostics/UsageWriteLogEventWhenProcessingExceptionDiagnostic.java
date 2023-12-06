@@ -69,7 +69,8 @@ public class UsageWriteLogEventWhenProcessingExceptionDiagnostic extends Abstrac
   private static final Set<Integer> rootsForRaiseStatement = Set.of(
     BSLParser.RULE_exceptCodeBlock, BSLParser.RULE_procedure, BSLParser.RULE_function, BSLParser.RULE_fileCodeBlock);
   private final ReferenceIndex referenceIndex;
-  private final Set<String> methodsWithRequiredCall = new HashSet<>();
+  // методы с ЗаписьЖР или ВызватьИсключение сразу в основном блоке кода
+  private final Set<String> rightLocalMethods = new HashSet<>();
   private final List<CodeBlockData> blocksForChecking = new ArrayList<>();
   //  private boolean insideException;
   private boolean hasRightCallInsideExceptionBlock;
@@ -162,17 +163,31 @@ public class UsageWriteLogEventWhenProcessingExceptionDiagnostic extends Abstrac
 
   @Override
   public ParseTree visitRaiseStatement(BSLParser.RaiseStatementContext ctx) {
-    handleExceptions(Trees.getRootParent(ctx, rootsForRaiseStatement));
+    processRaiseInsideException(Trees.getRootParent(ctx, rootsForRaiseStatement));
+    rememberMethodIfRightMethodIsAtFirstLevelMethodBlock(ctx);
     return super.defaultResult();
+  }
+
+  private void rememberMethodIfRightMethodIsAtFirstLevelMethodBlock(BSLParserRuleContext ctx) {
+    final var isFirstLevelOfMethodBlock = Optional.of(ctx)
+      .map(BSLParserRuleContext::getParent)
+      .map(BSLParserRuleContext::getParent)
+      .map(BSLParserRuleContext::getParent)
+      .map(BSLParserRuleContext::getParent)
+      .filter(BSLParser.SubCodeBlockContext.class::isInstance)
+      .isPresent();
+    if (isFirstLevelOfMethodBlock) {
+      rightLocalMethods.add(currentMethodName);
+    }
   }
 
   @Override
   public ParseTree visitReturnStatement(BSLParser.ReturnStatementContext ctx) {
-    handleExceptions(Trees.getRootParent(ctx, rootsForRaiseStatement));
+    processRaiseInsideException(Trees.getRootParent(ctx, rootsForRaiseStatement));
     return super.defaultResult();
   }
 
-  private void handleExceptions(BSLParserRuleContext ctx) {
+  private void processRaiseInsideException(BSLParserRuleContext ctx) {
     var insideException = currentExceptionBlockContext
       .filter(exceptBlockContext -> Ranges.compare(Ranges.create(ctx), exceptBlockContext) == 0)
       .isPresent();
@@ -185,7 +200,8 @@ public class UsageWriteLogEventWhenProcessingExceptionDiagnostic extends Abstrac
   public ParseTree visitGlobalMethodCall(BSLParser.GlobalMethodCallContext context) {
     if (!hasRightCallInsideExceptionBlock && isRightMethod(context)) {
       hasRightCallInsideExceptionBlock = true;
-      methodsWithRequiredCall.add(currentMethodName);
+      //rightLocalMethods.add(currentMethodName);
+      rememberMethodIfRightMethodIsAtFirstLevelMethodBlock(context);
     }
     return super.defaultResult(); // внутрь вызова нет смысла идти
   }
@@ -200,36 +216,35 @@ public class UsageWriteLogEventWhenProcessingExceptionDiagnostic extends Abstrac
 
     referencesToMethodCall = Collections.emptyList();
     blocksForChecking.clear();
-    methodsWithRequiredCall.clear();
+    rightLocalMethods.clear();
     currentExceptionBlockContext = Optional.empty();
 
     return super.defaultResult();
   }
 
   private void checkCodeBlock(CodeBlockData dto) {
-    if (hasRequiredCallInsideLocalMethods(dto.invokedLocalMethods.stream())) {
+    if (hasRightCallOrRaiseInsideLocalMethods(dto.invokedLocalMethods.stream())) {
       return;
     }
-    final var hasRequiredCallInsideLocalMethods = dto.invokedLocalMethods.stream()
-      .anyMatch(this::hasRequiredCallForFirstLevelOfNestingMethods);
-    if (hasRequiredCallInsideLocalMethods) {
-      return;
+    if (dto.invokedLocalMethods.stream()
+      .noneMatch(this::hasRightCallForFirstLevelOfNestingMethods)) {
+
+      fireIssue(dto.context);
     }
-    fireIssue(dto.context);
   }
 
-  private boolean hasRequiredCallInsideLocalMethods(Stream<MethodSymbol> stream) {
-    return stream
-      .anyMatch(methodSymbol -> methodsWithRequiredCall.contains(methodSymbol.getName()));
+  private boolean hasRightCallOrRaiseInsideLocalMethods(Stream<MethodSymbol> methodSymbolStream) {
+    return methodSymbolStream
+      .anyMatch(methodSymbol -> rightLocalMethods.contains(methodSymbol.getName()));
   }
 
-  private boolean hasRequiredCallForFirstLevelOfNestingMethods(MethodSymbol methodSymbol) {
+  private boolean hasRightCallForFirstLevelOfNestingMethods(MethodSymbol methodSymbol) {
     final var methodSymbolStream = referenceIndex.getReferencesFrom(methodSymbol).stream()
       .map(Reference::getSymbol)
       .filter(UsageWriteLogEventWhenProcessingExceptionDiagnostic::isMethodSymbol)
       .filter(MethodSymbol.class::isInstance)
       .map(MethodSymbol.class::cast);
-    return hasRequiredCallInsideLocalMethods(methodSymbolStream);
+    return hasRightCallOrRaiseInsideLocalMethods(methodSymbolStream);
   }
 
   private static class CodeBlockData {
