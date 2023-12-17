@@ -49,7 +49,8 @@ import java.util.stream.Collectors;
   severity = DiagnosticSeverity.MAJOR,
   modules = {
     ModuleType.CommonModule,
-    ModuleType.ObjectModule
+    ModuleType.ObjectModule,
+    ModuleType.UNKNOWN
   },
   minutesToFix = 1,
   tags = {

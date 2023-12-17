@@ -76,6 +76,12 @@ class UnusedLocalMethodDiagnosticTest extends AbstractDiagnosticTest<UnusedLocal
   }
 
   @Test
+  void testUnknowModule() {
+    getModuleDocumentContext(ModuleType.UNKNOWN);
+    checkByDefault(getDiagnostics(documentContext));
+  }
+
+  @Test
   void testConfigure() {
     // given
     Map<String, Object> configuration = diagnosticInstance.getInfo().getDefaultConfiguration();
@@ -111,9 +117,13 @@ class UnusedLocalMethodDiagnosticTest extends AbstractDiagnosticTest<UnusedLocal
   }
 
   private void getObjectModuleDocumentContext() {
+    getModuleDocumentContext(ModuleType.ObjectModule);
+  }
+
+  private void getModuleDocumentContext(ModuleType moduleType) {
     Path testFile = Paths.get(PATH_TO_MODULE_CONTENT).toAbsolutePath();
     getDocumentContextFromFile(testFile);
-    when(documentContext.getModuleType()).thenReturn(ModuleType.ObjectModule);
+    when(documentContext.getModuleType()).thenReturn(moduleType);
     when(documentContext.getMdObject()).thenReturn(Optional.of(module));
   }
 
