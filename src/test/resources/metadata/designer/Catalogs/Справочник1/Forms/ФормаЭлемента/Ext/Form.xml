@@ -76,5 +76,10 @@
 				</AdditionalColumns>
 			</Columns>
 		</Attribute>
+		<Attribute name="ПолеКартинки" id="3">
+			<Type>
+				<v8:Type>xs:string</v8:Type>
+			</Type>
+		</Attribute>
 	</Attributes>
 </Form>

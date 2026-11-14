@@ -110,6 +110,16 @@
             "title": "Assigning aliases to selected fields in a query",
             "$id": "#/definitions/AssignAliasFieldsInQuery"
         },
+        "AssignToFormAttributeInNoContext": {
+            "description": "Assignment to a form attribute in a no-context method",
+            "default": true,
+            "type": [
+                "boolean",
+                "object"
+            ],
+            "title": "Assignment to a form attribute in a no-context method",
+            "$id": "#/definitions/AssignToFormAttributeInNoContext"
+        },
         "AssignToReadOnlyProperty": {
             "description": "Assignment to a read-only property",
             "default": true,
