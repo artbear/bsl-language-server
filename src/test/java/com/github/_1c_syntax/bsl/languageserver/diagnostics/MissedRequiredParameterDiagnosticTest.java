@@ -22,6 +22,16 @@
 package com.github._1c_syntax.bsl.languageserver.diagnostics;
 
 import com.github._1c_syntax.bsl.languageserver.types.oscript.OScriptLibraryIndex;
+import com.github._1c_syntax.bsl.languageserver.context.FileType;
+import com.github._1c_syntax.bsl.languageserver.types.registry.TypeRegistry;
+import com.github._1c_syntax.bsl.languageserver.types.model.BilingualString;
+import com.github._1c_syntax.bsl.languageserver.types.model.MemberDescriptor;
+import com.github._1c_syntax.bsl.languageserver.types.model.MemberKind;
+import com.github._1c_syntax.bsl.languageserver.types.model.ParameterDescriptor;
+import com.github._1c_syntax.bsl.languageserver.types.model.PlatformMetadata;
+import com.github._1c_syntax.bsl.languageserver.types.model.SignatureDescriptor;
+import com.github._1c_syntax.bsl.languageserver.types.model.TypeKind;
+import com.github._1c_syntax.bsl.languageserver.types.model.TypeSet;
 import com.github._1c_syntax.bsl.languageserver.util.CleanupContextBeforeClassAndAfterEachTestMethod;
 import com.github._1c_syntax.bsl.languageserver.util.TestUtils;
 import com.github._1c_syntax.utils.Absolute;
@@ -46,6 +56,112 @@ class MissedRequiredParameterDiagnosticTest extends AbstractDiagnosticTest<Misse
 
   MissedRequiredParameterDiagnosticTest() {
     super(MissedRequiredParameterDiagnostic.class);
+  }
+
+  @Autowired
+  private TypeRegistry registry;
+
+  private static MemberDescriptor method(String ru, String en, SignatureDescriptor... signatures) {
+    return new MemberDescriptor(new BilingualString(ru, en), MemberKind.METHOD, BilingualString.EMPTY,
+      TypeSet.EMPTY, List.of(signatures), null, false, PlatformMetadata.EMPTY, false, true);
+  }
+
+  private void registerPlatformSignatures() {
+    // The minimal platform test package omits these methods. Supply their signatures,
+    // keeping real receiver inference and access-target resolution in the test.
+    var query = registry.registerConfigurationType("Запрос");
+    registry.registerConstructors(query, List.of(SignatureDescriptor.of(List.of())), FileType.BSL);
+    registry.registerMemberOverride(query, () -> List.of(method("УстановитьПараметр", "SetParameter",
+      SignatureDescriptor.of(List.of(ParameterDescriptor.of("Имя"), ParameterDescriptor.of("Значение"))))),
+      FileType.BSL);
+    var global = registry.intern(TypeKind.PLATFORM, "ГлобальныйКонтекст");
+    registry.registerMemberOverride(global, () -> List.of(
+      method("Лев", "Left", SignatureDescriptor.of(List.of(
+        ParameterDescriptor.of("Строка"), ParameterDescriptor.of("ЧислоСимволов")))),
+      method("Формат", "Format", SignatureDescriptor.of(List.of(
+        ParameterDescriptor.of("Значение"), ParameterDescriptor.of("ФорматнаяСтрока", true))))), FileType.BSL);
+  }
+
+  @Test
+  void resolvedOverloadsDefaultsAndVariadicTail() {
+    initServerContext();
+    var receiver = registry.registerConfigurationType("ПроверяемыйТип");
+    registry.registerConstructors(receiver, List.of(SignatureDescriptor.of(List.of())), FileType.BSL);
+    registry.registerMemberOverride(receiver, () -> List.of(
+      method("Перегрузки", "Overloads",
+        SignatureDescriptor.of(List.of(ParameterDescriptor.of("Первый"), ParameterDescriptor.of("Второй"))),
+        SignatureDescriptor.of(List.of(ParameterDescriptor.of("Первый")))),
+      method("ПоУмолчанию", "WithDefault", SignatureDescriptor.of(List.of(
+        new ParameterDescriptor("Значение", TypeSet.EMPTY, false, "", "Неопределено")))),
+      method("Вариативный", "Variadic", SignatureDescriptor.of(List.of(
+        ParameterDescriptor.of("Первый"), ParameterDescriptor.of("Остальные").withVariadic(true))))), FileType.BSL);
+    var document = TestUtils.getDocumentContext("""
+      Объект = Новый ПроверяемыйТип;
+      Объект.Перегрузки();
+      Объект.Перегрузки(1);
+      Объект.Overloads(1, 2);
+      Объект.ПоУмолчанию();
+      Объект.Вариативный();
+      Объект.Вариативный(1);
+      Объект.Variadic(1, 2, 3);
+      """, context);
+    var diagnostics = getDiagnostics(document);
+    assertThat(diagnostics).hasSize(2);
+    assertThat(diagnostics, true).hasRange(1, 7, 1, 19).hasRange(5, 7, 5, 20);
+  }
+
+  @Test
+  void configuredPositionsRecognizeEnglishMethodNames() {
+    initServerContext();
+    registerPlatformSignatures();
+    diagnosticInstance.configure(java.util.Map.of("requiredParameters", "фОрМаТ,2"));
+    var document = TestUtils.getDocumentContext("Результат = Format(1);", context);
+    assertThat(getDiagnostics(document)).hasSize(1);
+  }
+
+  @Test
+  void platformGlobalAndObjectRequiredParameters() {
+    initServerContext();
+    registerPlatformSignatures();
+    var document = TestUtils.getDocumentContext("""
+      Процедура Проверка()
+        Запрос = Новый Запрос;
+        Запрос.УстановитьПараметр(1);
+        Запрос.УстановитьПараметр("Имя", 1);
+        Запрос.УстановитьПараметр(, 1);
+        Результат = Лев();
+        Результат = Left("text", 1);
+        Неизвестный.УстановитьПараметр();
+      КонецПроцедуры
+      """, context);
+    assertThat(getDiagnostics(document)).hasSize(3);
+  }
+
+  @Test
+  void localGlobalNameUsesLocalSignature() {
+    initServerContext();
+    registerPlatformSignatures();
+    var document = TestUtils.getDocumentContext("""
+      Функция Лев(Значение = 1)
+        Возврат Значение;
+      КонецФункции
+      Результат = Лев();
+      """, context);
+    assertThat(getDiagnostics(document)).isEmpty();
+  }
+
+  @Test
+  void configuredOptionalPositionsAndReset() {
+    initServerContext();
+    registerPlatformSignatures();
+    var document = TestUtils.getDocumentContext("""
+      Результат = Формат(1);
+      Результат = Формат(1, "ЧДЦ=2");
+      """, context);
+    diagnosticInstance.configure(java.util.Map.of("requiredParameters", " Формат,1-2 | ЧислоПрописью,2 "));
+    assertThat(getDiagnostics(document)).hasSize(1);
+    diagnosticInstance.configure(java.util.Map.of());
+    assertThat(getDiagnostics(document)).isEmpty();
   }
 
   @ParameterizedTest

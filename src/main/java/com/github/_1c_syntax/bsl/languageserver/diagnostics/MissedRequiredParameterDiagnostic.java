@@ -24,6 +24,9 @@ package com.github._1c_syntax.bsl.languageserver.diagnostics;
 import com.github._1c_syntax.bsl.languageserver.context.symbol.MethodSymbol;
 import com.github._1c_syntax.bsl.languageserver.context.symbol.Symbol;
 import com.github._1c_syntax.bsl.languageserver.diagnostics.metadata.DiagnosticMetadata;
+import com.github._1c_syntax.bsl.languageserver.diagnostics.metadata.DiagnosticParameter;
+import com.github._1c_syntax.bsl.languageserver.types.TypeService;
+import com.github._1c_syntax.bsl.languageserver.types.model.MemberDescriptor;
 import com.github._1c_syntax.bsl.languageserver.diagnostics.metadata.DiagnosticSeverity;
 import com.github._1c_syntax.bsl.languageserver.diagnostics.metadata.DiagnosticTag;
 import com.github._1c_syntax.bsl.languageserver.diagnostics.metadata.DiagnosticType;
@@ -44,6 +47,9 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.TreeMap;
+import java.util.HashSet;
 
 @DiagnosticMetadata(
   type = DiagnosticType.ERROR,
@@ -57,12 +63,42 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class MissedRequiredParameterDiagnostic extends AbstractVisitorDiagnostic {
 
+  private final TypeService typeService;
+
+  @DiagnosticParameter(type = String.class, defaultValue = "")
+  private String requiredParameters = "";
+  private final Map<String, Set<Integer>> requiredPositions = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
+
+  @Override
+  public void configure(Map<String, Object> configuration) {
+    requiredParameters = (String) configuration.getOrDefault("requiredParameters", "");
+    requiredPositions.clear();
+    for (var entry : requiredParameters.split("\\|")) {
+      if (entry.isBlank()) {
+        continue;
+      }
+      var parts = entry.trim().split(",", -1);
+      if (parts.length != 2 || parts[0].isBlank()) {
+        throw new IllegalArgumentException("Expected Method,1-2 in requiredParameters: " + entry);
+      }
+      var positions = requiredPositions.computeIfAbsent(parts[0].trim(), key -> new HashSet<>());
+      for (var value : parts[1].trim().split("-", -1)) {
+        var position = Integer.parseInt(value.trim());
+        if (position < 1) {
+          throw new IllegalArgumentException("Parameter positions start at 1: " + entry);
+        }
+        positions.add(position);
+      }
+    }
+  }
+
   private final ReferenceIndex referenceIndex;
   private final ReferenceResolver referenceResolver;
   private final Map<Range, MethodCall> calls = new HashMap<>();
 
   @Override
   public ParseTree visitFile(BSLParser.FileContext ctx) {
+    calls.clear();
     super.visitFile(ctx);
     for (var reference : referenceIndex.getReferencesFrom(documentContext.getUri(), SymbolKind.Method)) {
       var call = calls.get(reference.selectionRange());
@@ -78,6 +114,8 @@ public class MissedRequiredParameterDiagnostic extends AbstractVisitorDiagnostic
     var methodName = ctx.methodName().IDENTIFIER().getText();
     if (documentContext.getSymbolTree().getMethodSymbol(methodName).isPresent()) {
       appendMethodCall(ctx.methodName().getStart(), ctx.doCall(), ctx);
+    } else {
+      checkResolvedCall(ctx.methodName().IDENTIFIER(), ctx.doCall(), ctx);
     }
 
     return super.visitGlobalMethodCall(ctx);
@@ -85,7 +123,9 @@ public class MissedRequiredParameterDiagnostic extends AbstractVisitorDiagnostic
 
   @Override
   public ParseTree visitMethodCall(BSLParser.MethodCallContext ctx) {
-    appendMethodCall(ctx.methodName().getStart(), ctx.doCall(), ctx);
+    if (!checkResolvedCall(ctx.methodName().IDENTIFIER(), ctx.doCall(), ctx)) {
+      appendMethodCall(ctx.methodName().getStart(), ctx.doCall(), ctx);
+    }
     return super.visitMethodCall(ctx);
   }
 
@@ -95,10 +135,39 @@ public class MissedRequiredParameterDiagnostic extends AbstractVisitorDiagnostic
     return super.visitNewExpression(ctx);
   }
 
+  private boolean checkResolvedCall(org.antlr.v4.runtime.tree.TerminalNode name,
+                                    BSLParser.@Nullable DoCallContext doCall, ParserRuleContext node) {
+    var members = typeService.accessTargetsAt(documentContext, name, null);
+    if (members.isEmpty() || members.stream().anyMatch(member -> member.descriptor().signatures().isEmpty())) {
+      return false;
+    }
+    var signatures = members.stream().flatMap(member -> {
+      var descriptor = member.descriptor();
+      return descriptor.signatures().stream().map(signature -> {
+        List<Parameter> parameters = new ArrayList<>();
+        for (int i = 0; i < signature.parameters().size(); i++) {
+          var parameter = signature.parameters().get(i);
+          boolean forced = isRequired(descriptor, i + 1);
+          parameters.add(new Parameter(parameter.name(), !forced
+            && (parameter.optional() || !parameter.defaultValue().isEmpty() || parameter.variadic())));
+        }
+        return parameters;
+      });
+    }).toList();
+    checkSignatures(signatures, arguments(doCall), Ranges.create(node));
+    return true;
+  }
+
+  private boolean isRequired(MemberDescriptor member, int position) {
+    return requiredPositions.entrySet().stream()
+      .anyMatch(entry -> member.matches(entry.getKey()) && entry.getValue().contains(position));
+  }
+
   private void appendMethodCall(Token methodName, BSLParser.@Nullable DoCallContext doCallContext, ParserRuleContext node) {
     var methodCall = new MethodCall();
     methodCall.arguments = arguments(doCallContext);
     methodCall.range = Ranges.create(node);
+    methodCall.name = methodName.getText();
     calls.put(Ranges.create(methodName), methodCall);
   }
 
@@ -119,8 +188,10 @@ public class MissedRequiredParameterDiagnostic extends AbstractVisitorDiagnostic
       return;
     }
 
-    var arguments = arguments(ctx.doCall());
+    checkSignatures(signatures, arguments(ctx.doCall()), Ranges.create(ctx));
+  }
 
+  private void checkSignatures(List<List<Parameter>> signatures, Boolean[] arguments, Range range) {
     List<String> bestMissedParameters = null;
     for (var signature : signatures) {
       var missedParameters = missedParameters(signature, arguments);
@@ -132,12 +203,20 @@ public class MissedRequiredParameterDiagnostic extends AbstractVisitorDiagnostic
       }
     }
 
-    addDiagnostic(Ranges.create(ctx), bestMissedParameters);
+    if (bestMissedParameters != null) {
+      addDiagnostic(range, bestMissedParameters);
+    }
   }
 
   private void checkMethod(MethodSymbol methodDefinition, MethodCall callInfo) {
     var signature = signature(methodDefinition);
-    var missedParameters = missedParameters(signature, callInfo.arguments);
+    var positions = requiredPositions.getOrDefault(callInfo.name, Set.of());
+    var configuredSignature = new ArrayList<Parameter>();
+    for (int i = 0; i < signature.size(); i++) {
+      var parameter = signature.get(i);
+      configuredSignature.add(new Parameter(parameter.name(), parameter.optional() && !positions.contains(i + 1)));
+    }
+    var missedParameters = missedParameters(configuredSignature, callInfo.arguments);
     if (!missedParameters.isEmpty()) {
       addDiagnostic(callInfo.range, missedParameters);
     }
@@ -169,7 +248,8 @@ public class MissedRequiredParameterDiagnostic extends AbstractVisitorDiagnostic
     if (symbol instanceof ConstructorCallSymbol constructorCall) {
       return constructorCall.getConstructors().stream()
         .map(constructor -> constructor.parameters().stream()
-          .map(parameter -> new Parameter(parameter.name(), parameter.optional()))
+          .map(parameter -> new Parameter(parameter.name(), parameter.optional() || parameter.variadic()
+            || !parameter.defaultValue().isEmpty()))
           .toList())
         .toList();
     }
@@ -197,6 +277,7 @@ public class MissedRequiredParameterDiagnostic extends AbstractVisitorDiagnostic
   private static class MethodCall {
     Boolean[] arguments;
     Range range;
+    String name;
   }
 
   private record Parameter(String name, boolean optional) {
