@@ -145,6 +145,7 @@ final class InferenceContext {
       ? flowSession : new VariableFlowAnalyzer.FlowSession(contextualReturns::invalidate);
     var result = new InferenceContext(owner, target, contextualReturns, session, compilation);
     if (session != flowSession) {
+      session.requireCompleteTypes = flowSession.requireCompleteTypes;
       session.contextTracking = flowSession.contextTracking;
       session.contextFreeDeclarations = flowSession.contextFreeDeclarations;
       session.contextSensitive = flowSession.contextSensitive;

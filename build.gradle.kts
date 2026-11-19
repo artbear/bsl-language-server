@@ -36,6 +36,10 @@ repositories {
     maven(url = "https://projectlombok.org/edge-releases")
     maven("https://central.sonatype.com/repository/maven-snapshots")
     maven(url = "https://repo.spring.io/milestone")
+    exclusiveContent {
+        forRepository { maven("https://jitpack.io") }
+        filter { includeModule("com.github.artbear", "bsl-context") }
+    }
 }
 
 
@@ -103,7 +107,7 @@ dependencies {
     api("io.github.1c-syntax:mdclasses:0.21.0")
     api("io.github.1c-syntax:bsl-common-library:0.12.5")
     api("io.github.1c-syntax:supportconf:0.17.1")
-    api("io.github.1c-syntax:bsl-context:0.10.2")
+    api("com.github.artbear:bsl-context:a10509668b9bf4aeb77b21f25c19669eaf4579da")
 
     // nullability annotations
     api("org.jspecify:jspecify:1.0.1")

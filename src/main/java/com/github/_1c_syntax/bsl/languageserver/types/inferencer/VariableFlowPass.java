@@ -26,13 +26,15 @@ import com.github._1c_syntax.bsl.languageserver.cfg.ControlFlowGraph;
 import com.github._1c_syntax.bsl.languageserver.cfg.PreprocessorFlow;
 import com.github._1c_syntax.bsl.languageserver.context.DocumentContext;
 import com.github._1c_syntax.bsl.languageserver.context.symbol.VariableSymbol;
+import com.github._1c_syntax.bsl.languageserver.types.model.TypeRef;
 import com.github._1c_syntax.bsl.languageserver.types.model.TypeSet;
+import com.google.common.base.Equivalence;
 import org.antlr.v4.runtime.ParserRuleContext;
 import org.jspecify.annotations.Nullable;
+
 import java.util.ArrayList;
-import java.util.IdentityHashMap;
 import java.util.BitSet;
-import com.google.common.base.Equivalence;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import com.github._1c_syntax.bsl.languageserver.types.inferencer.VariableFlowAnalyzer.Facts;
@@ -118,6 +120,9 @@ final class VariableFlowPass {
    */
   Facts computeFacts() {
     var byVertex = computeEntryFacts();
+    if (byVertex.isEmpty()) {
+      return new Facts(Map.of(), Map.of(), Map.of(), FlowEnvironment.EMPTY);
+    }
     for (var vertex : layout.orderedVertices()) {
       if (compiledFlow != null && !compiledFlow.vertices().contains(vertex)) {
         continue;
@@ -180,10 +185,10 @@ final class VariableFlowPass {
         }
       }
       if (!changed) {
-        break;
+        return facts;
       }
     }
-    return facts;
+    return inputs.session().requireCompleteTypes ? Map.of() : facts;
   }
 
   /**
@@ -230,8 +235,9 @@ final class VariableFlowPass {
       var atPredecessor = facts.get(predecessor);
       if (atPredecessor != null) {
         var outgoing = outgoingOf(predecessor, atPredecessor);
-        joined = joined.union(FlowConditionNarrowing.narrow(predecessor, edge.getType(), outgoing,
-          inputs.narrowing(), bodyVariables.variables(), bodyVariables.indexes()));
+        joined = joined.union(inputs.session().requireCompleteTypes ? outgoing
+          : FlowConditionNarrowing.narrow(predecessor, edge.getType(), outgoing,
+            inputs.narrowing(), bodyVariables.variables(), bodyVariables.indexes()));
       }
     }
     return joined;
@@ -294,6 +300,15 @@ final class VariableFlowPass {
         }
         current = changed;
       }
+    }
+    if (inputs.session().requireCompleteTypes) {
+      var variables = bodyVariables.variables();
+      for (var index = 0; index < variables.size(); index++) {
+        if (!assignedBy(changes, index) && layout.mayWriteBack(statement, variables.get(index).getName(), null)) {
+          current = current.with(index, TypeSet.of(TypeRef.UNKNOWN), variables.size());
+        }
+      }
+      return current;
     }
     return forgetSharedAfterCall(statement, changes, current);
   }

@@ -383,6 +383,48 @@ public class SymbolTypeIndex {
       .orElse(TypeSet.EMPTY);
   }
 
+  /** Типы для проверки совместимости. Частично разрешённый список недоказателен. */
+  public TypeSet getCompleteParameterTypes(ParameterDefinition parameter, DocumentContext owner) {
+    var declared = parameter.getDescription().map(description -> completeTypes(description.types(), owner))
+      .orElse(TypeSet.EMPTY);
+    if (declared.isEmpty()) {
+      return declared;
+    }
+    var defaultType = switch (parameter.getDefaultValue().type()) {
+      case DATETIME -> "Дата";
+      case BOOLEAN -> "Булево";
+      case UNDEFINED -> "Неопределено";
+      case NULL -> "Null";
+      case STRING -> "Строка";
+      case NUMERIC -> "Число";
+      case EMPTY -> "";
+    };
+    return defaultType.isEmpty() ? declared : declared.union(TypeSet.of(new TypeRef(TypeKind.PRIMITIVE, defaultType)));
+  }
+
+  /** Полное объявление номинального типа возвращаемого значения. */
+  public TypeSet getCompleteReturnTypes(MethodSymbol method) {
+    return method.getDescription().map(MethodDescription::getReturnedValue)
+      .map(types -> completeTypes(types, method.getOwner())).orElse(TypeSet.EMPTY);
+  }
+
+  private TypeSet completeTypes(List<? extends TypeDescription> descriptions, DocumentContext owner) {
+    var result = TypeSet.EMPTY;
+    var context = new ResolutionContext(owner, owner.getFileType(), new HashSet<>());
+    for (var description : descriptions) {
+      // Разрешение См.-ссылки для подсказок может вернуть лишь известную часть альтернатив.
+      if (description.variant() == TypeDescription.Variant.HYPERLINK) {
+        return TypeSet.EMPTY;
+      }
+      var resolved = resolveTypeDescription(description, context);
+      if (resolved.isEmpty()) {
+        return TypeSet.EMPTY;
+      }
+      result = result.union(resolved);
+    }
+    return result;
+  }
+
   /**
    * Ведёт ли какая-нибудь ссылка {@code См.} в описании возвращаемого значения метода в модуль,
    * до разбора которого очередь ещё не дошла. Смотрятся и вложенные ссылки (элементы

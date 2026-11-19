@@ -133,6 +133,8 @@ public class ExpressionTypeInferencer {
   /** Методная форма индексатора: {@code Коллекция.Получить(Индекс)} — это {@code Коллекция[Индекс]}. */
   private static final String ELEMENT_GETTER = "Получить";
 
+  private static final TypeSet UNKNOWN = TypeSet.of(TypeRef.UNKNOWN);
+
   private static final TypeRef NUMBER = new TypeRef(TypeKind.PRIMITIVE, "Число");
   private static final TypeRef STRING = new TypeRef(TypeKind.PRIMITIVE, "Строка");
   private static final TypeRef BOOLEAN = new TypeRef(TypeKind.PRIMITIVE, "Булево");
@@ -194,6 +196,36 @@ public class ExpressionTypeInferencer {
   @EventListener
   public void handleServerContextPopulated(ServerContextPopulatedEvent event) {
     workspacePopulated = true;
+  }
+
+  /**
+   * Вывод для проверки аргументов сохраняет неизвестные альтернативы.
+   * Окружения потока переиспользуются в рамках документа, в индекс подсказок не записываются.
+   */
+  public ArgumentTypes argumentTypes(DocumentContext document) {
+    return new ArgumentTypes(document);
+  }
+
+  public final class ArgumentTypes {
+    private final InferenceContext context;
+
+    private ArgumentTypes(DocumentContext document) {
+      context = contextFor(document, null);
+      context.flowSession.requireCompleteTypes = true;
+    }
+
+    public TypeSet of(BSLParser.ExpressionContext expression) {
+      return of(DiagnosticDeclarationSession.expressionTree(expression));
+    }
+
+    public TypeSet of(@Nullable BslExpression expression) {
+      try {
+        return inferInternal(expression, context);
+      } catch (StackOverflowError | RuntimeException e) {
+        LOGGER.error("Вывод типов аргумента сорвался: {}", context.documentContext.getUri(), e);
+        return UNKNOWN;
+      }
+    }
   }
 
   /**
@@ -331,12 +363,13 @@ public class ExpressionTypeInferencer {
    * позиционных запросов, а вычисления внутри выбранного режима используют отдельные окружения.
    */
   private TypeSet inferInternal(@Nullable BslExpression node, InferenceContext ctx, boolean useCallerContext) {
+    var absent = ctx.flowSession.requireCompleteTypes ? UNKNOWN : TypeSet.EMPTY;
     if (node == null) {
-      return TypeSet.EMPTY;
+      return absent;
     }
     if (ctx.depth >= MAX_DEPTH) {
       ctx.depthCut = true;
-      return TypeSet.EMPTY;
+      return absent;
     }
     var cacheKey = cacheKeyFor(node, ctx);
     var uri = ctx.documentContext.getUri();
@@ -353,7 +386,7 @@ public class ExpressionTypeInferencer {
       if (cacheKey != null && completeRoot(ctx)) {
         inferredExpressionTypeIndex.put(uri, cacheKey, result, ctx.dependencies, revision);
       }
-      return result;
+      return result.isEmpty() ? absent : result;
     } finally {
       ctx.depth--;
     }
@@ -365,7 +398,8 @@ public class ExpressionTypeInferencer {
    * тип переменной ещё меняется. Эти результаты нельзя сохранять под URI исходного запроса.
    */
   private static @Nullable ParseTree cacheKeyFor(BslExpression node, InferenceContext ctx) {
-    return ctx.executionContext == null && ctx.visited.isEmpty() && ctx.inProgress.isEmpty()
+    return !ctx.flowSession.requireCompleteTypes
+      && ctx.executionContext == null && ctx.visited.isEmpty() && ctx.inProgress.isEmpty()
       && !ctx.flowSession.computing() ? node.getRepresentingAst() : null;
   }
 
@@ -530,8 +564,11 @@ public class ExpressionTypeInferencer {
       markContextSensitive(ctx);
       return TypeSet.EMPTY;
     }
-    var base = typeRegistry.resolve(typeName, ctx.documentContext.getFileType())
-      .map(TypeSet::of)
+    var resolved = typeRegistry.resolve(typeName, ctx.documentContext.getFileType());
+    if (ctx.flowSession.requireCompleteTypes) {
+      return resolved.map(TypeSet::of).orElse(UNKNOWN);
+    }
+    var base = resolved.map(TypeSet::of)
       .orElseGet(() -> TypeSet.of(typeRegistry.intern(TypeKind.USER, typeName)));
     if (ctx.flowSession.contextTracking && (!constructor.isStaticallyTyped()
       || base.refs().stream().anyMatch(ref -> ref.kind() != TypeKind.PLATFORM
@@ -721,6 +758,16 @@ public class ExpressionTypeInferencer {
     var localMethod = reference
       .filter(MethodSymbol.class::isInstance)
       .map(MethodSymbol.class::cast);
+    if (ctx.flowSession.requireCompleteTypes) {
+      if (localMethod.isPresent()) {
+        return completeReturnTypes(localMethod.orElseThrow());
+      }
+      var declared = scopeMemberTypeResolver.globalFunctionType(ctx.documentContext, name.getText());
+      return declared.isEmpty()
+        ? scopeMemberTypeResolver.selfMemberType(ctx.documentContext, name.getText(), MemberKind.METHOD)
+          .orElse(UNKNOWN)
+        : declared;
+    }
     // 0. Общий модуль по имени: у вызова `ОбщийМодуль("Х")` объявленный возврат обобщённый —
     //    «какой-то модуль», — а имя названо литералом, поэтому тип конкретного модуля точнее.
     //    Проверяется до шага 1 по той же причине, что и открытие формы по имени: иначе
@@ -771,7 +818,7 @@ public class ExpressionTypeInferencer {
       return inferDereference(node, ctx);
     }
     if (op == BslOperator.INDEX_ACCESS) {
-      return inferIndexAccess(node, ctx);
+      return ctx.flowSession.requireCompleteTypes ? UNKNOWN : inferIndexAccess(node, ctx);
     }
     if (isLogical(op) || isComparison(op)) {
       return TypeSet.of(BOOLEAN);
@@ -779,6 +826,17 @@ public class ExpressionTypeInferencer {
     if (op == BslOperator.ADD) {
       // Тип `+` определяется ЛЕВЫМ операндом — правый приводится к нему.
       var left = inferInternal(node.getLeft(), ctx);
+      if (ctx.flowSession.requireCompleteTypes) {
+        var result = TypeSet.EMPTY;
+        for (var type : left.refs()) {
+          if (type.equals(STRING) || type.equals(DATE)) {
+            result = result.union(TypeSet.of(type));
+          } else {
+            result = result.union(type.equals(NUMBER) || type.equals(BOOLEAN) ? TypeSet.of(NUMBER) : UNKNOWN);
+          }
+        }
+        return result;
+      }
       if (left.refs().contains(STRING)) {
         return TypeSet.of(STRING);
       }
@@ -928,6 +986,9 @@ public class ExpressionTypeInferencer {
     if (memberName == null || memberName.isBlank()) {
       return TypeSet.EMPTY;
     }
+    if (ctx.flowSession.requireCompleteTypes) {
+      return declaredMemberTypes(leftTypes, memberName, expectedKind, ctx);
+    }
     var refined = refinedMemberTypes(leftTypes, memberName, methodCall, ctx);
     if (refined != null) {
       return refined;
@@ -1013,12 +1074,35 @@ public class ExpressionTypeInferencer {
     return result.withFields(ref, declared.getLocalFields(ref));
   }
 
+  private TypeSet declaredMemberTypes(TypeSet owners, String name, MemberKind kind, InferenceContext ctx) {
+    var result = TypeSet.EMPTY;
+    for (var owner : owners.refs()) {
+      var members = MemberLookupSession.lookup(
+        typeRegistry.getMembers(owner, ctx.documentContext.getFileType()), kind, name);
+      if (members.isEmpty()) {
+        result = result.union(UNKNOWN);
+      }
+      for (var member : members) {
+        var types = member.getSourceSymbol().orElse(null) instanceof MethodSymbol method
+          ? completeReturnTypes(method) : member.returnTypes();
+        result = result.union(types.isEmpty() ? UNKNOWN : types);
+      }
+    }
+    return result;
+  }
+
+  private TypeSet completeReturnTypes(MethodSymbol method) {
+    var declarations = compilationContextResolver.declarations(method.getOwner())
+      .getOrDefault(method.getName(), List.of());
+    return declarations.size() > 1 ? UNKNOWN : symbolTypeIndex.getCompleteReturnTypes(method);
+  }
+
   @Nullable
-  private static String memberNameOf(ParseTree ast) {
+  private static String memberNameOf(@Nullable ParseTree ast) {
     if (ast instanceof TerminalNode terminal) {
       return terminal.getText();
     }
-    return ast.getText();
+    return ast == null ? null : ast.getText();
   }
 
   @SuppressWarnings("unused")
@@ -1488,6 +1572,10 @@ public class ExpressionTypeInferencer {
     var owner = variable.getOwner();
     // Сравнение по ссылке: на URI в рабочей области приходится ровно один DocumentContext,
     // а сравнение самих URI нормализует проценты и стоит заметно дороже.
+    if (ctx.flowSession.requireCompleteTypes
+      && (owner != ctx.documentContext || variable.getKind() == VariableKind.MODULE)) {
+      return UNKNOWN;
+    }
     if (owner != ctx.documentContext) {
       // Переменная из другого документа: чужое дерево разбора не читаем, берём
       // объявленное о ней — оно есть в самом символе.
@@ -1507,6 +1595,9 @@ public class ExpressionTypeInferencer {
           () -> !ctx.cycleCut && !ctx.bodyInFlowCut && !ctx.depthCut)
         : variableFlowAnalyzer.typeAt(owner, use, variable, inputs);
       if (byFlow == null) {
+        if (ctx.flowSession.requireCompleteTypes) {
+          return UNKNOWN;
+        }
         ctx.failed = true;
         // Обращение к переменной есть, а расчёт его не разместил — это дефект расчёта, а не
         // особенность кода 1С. Подменять ответ нечем: любая подмена скрыла бы дефект.
@@ -1689,6 +1780,9 @@ public class ExpressionTypeInferencer {
     Map<VariableSymbol, TypeSet> declaredByVariable = new HashMap<>();
     var sharedDeclarations = workspacePopulated ? DiagnosticDeclarationSession.current() : null;
     Function<VariableSymbol, TypeSet> declaredOf = (VariableSymbol target) -> {
+      if (ctx.flowSession.requireCompleteTypes) {
+        return declaredByVariable.computeIfAbsent(target, this::argumentEntryTypes);
+      }
       var cached = declaredByVariable.get(target);
       if (cached != null) {
         return cached;
@@ -1750,16 +1844,30 @@ public class ExpressionTypeInferencer {
       body -> compilationContexts(body, owner, ctx),
       () -> ctx.sawMissing || ctx.failed,
       body -> variablesOfBody(owner, body),
-      target -> target.getKind() == VariableKind.MODULE,
+      target -> !ctx.flowSession.requireCompleteTypes && target.getKind() == VariableKind.MODULE,
       declaredOf,
       this::definitionPositions,
       target -> mutationPositions(callsOf.apply(target), kindsOf.apply(target), propertiesOf.apply(target)),
       (target, statement, position) ->
         attachDefaultElementTypes(inferFromDefinition(owner, statement, position, ctx)),
-      (target, position, incoming) -> applyMutation(target, position, incoming, ctx,
-        callsOf.apply(target), kindsOf.apply(target), propertiesOf.apply(target)),
+      (target, position, incoming) -> ctx.flowSession.requireCompleteTypes ? incoming
+        : applyMutation(target, position, incoming, ctx,
+          callsOf.apply(target), kindsOf.apply(target), propertiesOf.apply(target)),
       narrowingCallback(owner)
     );
+  }
+
+  private TypeSet argumentEntryTypes(VariableSymbol variable) {
+    if (variable.getKind() != VariableKind.PARAMETER || !(variable.getScope() instanceof MethodSymbol method)) {
+      return UNKNOWN;
+    }
+    for (var parameter : method.getParameters()) {
+      if (parameter.getName().equalsIgnoreCase(variable.getName())) {
+        var declared = symbolTypeIndex.getCompleteParameterTypes(parameter, method.getOwner());
+        return declared.isEmpty() ? UNKNOWN : declared;
+      }
+    }
+    return UNKNOWN;
   }
 
   /**
@@ -2154,11 +2262,15 @@ public class ExpressionTypeInferencer {
     if (statement instanceof BSLParser.AssignmentContext assignment) {
       var expression = DiagnosticDeclarationSession.expressionTree(assignment.expression());
       var types = expression == null ? TypeSet.EMPTY : inferInternal(expression, ctx);
-      return types.union(typesOfAssignmentComment(owner, assignment, ctx));
+      return ctx.flowSession.requireCompleteTypes ? (types.isEmpty() ? UNKNOWN : types)
+        : types.union(typesOfAssignmentComment(owner, assignment, ctx));
     }
     if (statement instanceof BSLParser.ForStatementContext) {
       // Счётчик «Для Сч = 1 По Граница» — всегда число: язык другого не допускает.
       return TypeSet.of(NUMBER);
+    }
+    if (ctx.flowSession.requireCompleteTypes) {
+      return UNKNOWN;
     }
     if (statement instanceof BSLParser.ForEachStatementContext forEach) {
       // Связывание «Для Каждого Х Из Коллекция»: тип Х — тип элемента коллекции.

@@ -29,11 +29,14 @@ import com.github._1c_syntax.bsl.languageserver.cfg.ControlFlowGraph;
 import com.github._1c_syntax.bsl.languageserver.cfg.ForLoopVertex;
 import com.github._1c_syntax.bsl.languageserver.cfg.ForeachLoopVertex;
 import com.github._1c_syntax.bsl.languageserver.cfg.WhileLoopVertex;
+import com.github._1c_syntax.bsl.languageserver.utils.Positions;
 import com.github._1c_syntax.bsl.languageserver.utils.Trees;
+import com.github._1c_syntax.bsl.languageserver.utils.expressiontree.ExpressionNodeType;
 import com.github._1c_syntax.bsl.parser.BSLParser;
 import com.github._1c_syntax.utils.Lazy;
 import org.antlr.v4.runtime.ParserRuleContext;
 import org.antlr.v4.runtime.Token;
+import org.antlr.v4.runtime.tree.TerminalNode;
 import org.eclipse.lsp4j.Position;
 import org.jspecify.annotations.Nullable;
 
@@ -49,6 +52,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+
+import static org.eclipse.lsp4j.util.Positions.isBefore;
 
 /**
  * Разложенное по позициям тело метода: операторы графа с их границами и вершинами,
@@ -102,6 +108,8 @@ final class FlowLayout {
 
   /** Операторы с вызовами: считаются по первому требованию, см. {@link #hasCall}. */
   private final Lazy<Set<ParserRuleContext>> callStatements = new Lazy<>(this::findCallStatements);
+
+  private final Map<ParserRuleContext, List<Writeback>> writebacks = new ConcurrentHashMap<>();
 
   private FlowLayout(
     List<Slot> slots,
@@ -351,6 +359,46 @@ final class FlowLayout {
       }
     }
     return false;
+  }
+
+  /** Аргумент по ссылке и динамический код могут изменить локальную переменную. */
+  private record Writeback(@Nullable String variable, Position end) {
+  }
+
+  boolean mayWriteBack(ParserRuleContext statement, String name, @Nullable Position use) {
+    return writebacks.computeIfAbsent(statement, this::findWritebacks).stream()
+      .anyMatch(write -> (write.variable() == null || name.equalsIgnoreCase(write.variable()))
+        && (use == null || !isBefore(use, write.end())));
+  }
+
+  private List<Writeback> findWritebacks(ParserRuleContext statement) {
+    var slot = byStatement.get(statement);
+    if (slot == null) {
+      return List.of();
+    }
+    List<Writeback> result = new ArrayList<>();
+    for (var node : Trees.findAllRuleNodes(statement, BSLParser.RULE_doCall, BSLParser.RULE_executeStatement)) {
+      var end = Positions.createEnd(node.getStop());
+      if (!slot.covers(Positions.create(node.getStart())) || !slot.covers(end)) {
+        continue;
+      }
+      if (node instanceof BSLParser.DoCallContext call) {
+        var params = call.callParamList();
+        if (params == null) {
+          continue;
+        }
+        for (var param : params.callParam()) {
+          var argument = DiagnosticDeclarationSession.expressionTree(param.expression());
+          if (argument != null && argument.getNodeType() == ExpressionNodeType.IDENTIFIER
+            && argument.getRepresentingAst() instanceof TerminalNode terminal) {
+            result.add(new Writeback(terminal.getText(), end));
+          }
+        }
+      } else {
+        result.add(new Writeback(null, end));
+      }
+    }
+    return List.copyOf(result);
   }
 
   /**

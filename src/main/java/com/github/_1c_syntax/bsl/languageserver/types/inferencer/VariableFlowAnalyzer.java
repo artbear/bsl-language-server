@@ -34,6 +34,7 @@ import com.github._1c_syntax.bsl.languageserver.context.symbol.variable.Variable
 import com.github._1c_syntax.bsl.languageserver.index.AbstractDocumentLifecycleClearableIndex;
 import com.github._1c_syntax.bsl.languageserver.index.SourceBoundRecords;
 import com.github._1c_syntax.bsl.languageserver.infrastructure.WorkspaceScope;
+import com.github._1c_syntax.bsl.languageserver.types.model.TypeRef;
 import com.github._1c_syntax.bsl.languageserver.types.model.TypeSet;
 import com.github._1c_syntax.bsl.languageserver.utils.Ranges;
 import com.github._1c_syntax.bsl.parser.BSLParser;
@@ -181,6 +182,8 @@ public class VariableFlowAnalyzer extends AbstractDocumentLifecycleClearableInde
    * явный, время жизни — вызов вывода; общего изменяемого состояния между потоками нет.
    */
   public static final class FlowSession {
+    boolean requireCompleteTypes;
+    private final Map<BSLParser.CodeBlockContext, Facts> localFacts = new IdentityHashMap<>();
     boolean contextTracking;
     boolean contextFreeDeclarations;
     boolean contextSensitive;
@@ -842,6 +845,9 @@ public class VariableFlowAnalyzer extends AbstractDocumentLifecycleClearableInde
     if (layout.vertexOf(useStatement) == null) {
       return null;
     }
+    if (inputs.session().requireCompleteTypes && layout.mayWriteBack(useStatement, variable.getName(), usePosition)) {
+      return TypeSet.of(TypeRef.UNKNOWN);
+    }
     // Запрос пришёл посреди расчёта этого же тела — из вывода типа чьего-то присваивания.
     // Отвечаем тем, что насчитано к этому моменту: перезапуск расчёта дал бы тот же ответ,
     // только пройдя тело ещё раз.
@@ -861,6 +867,9 @@ public class VariableFlowAnalyzer extends AbstractDocumentLifecycleClearableInde
       ? atDefinition
       : change != null && change.definition() && Ranges.containsPosition(useNode, change.position());
     if (!inclusive || change == null) {
+      if (inputs.session().requireCompleteTypes) {
+        return before;
+      }
       return narrowedInsideCondition(layout, useStatement, usePosition, variable, before, inputs);
     }
     // Использование стоит на самом изменении — нужен тип после него.
@@ -920,7 +929,9 @@ public class VariableFlowAnalyzer extends AbstractDocumentLifecycleClearableInde
   private Facts factsOf(DocumentContext documentContext, BSLParser.CodeBlockContext body,
     FlowLayout layout, FlowInputs inputs, @Nullable BooleanSupplier sharedRoot) {
     Map<BSLParser.CodeBlockContext, Facts> byBody = null;
-    if (inputs.cacheable()) {
+    if (inputs.session().requireCompleteTypes) {
+      byBody = inputs.session().localFacts;
+    } else if (inputs.cacheable()) {
       byBody = inputs.executionContext() == null
         ? factsByUri.computeIfAbsent(documentContext.getUri(), uri -> new ConcurrentHashMap<>())
         : contextualFactsByUri.computeIfAbsent(documentContext.getUri(), uri -> new ConcurrentHashMap<>())

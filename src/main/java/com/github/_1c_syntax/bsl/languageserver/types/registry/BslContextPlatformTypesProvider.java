@@ -335,7 +335,7 @@ public class BslContextPlatformTypesProvider implements PlatformTypesProvider {
         // управляемой группы/таблицы относятся к FormItems, а не к обычным Controls.
         var preciseType = formCollectionPropertyType(context, property, typeRefs);
         if (preciseType != null) {
-          member = member.withReturnTypes(TypeSet.of(preciseType));
+          member = member.withReturnTypes(withUnresolvedType(TypeSet.of(preciseType), property.hasUnresolvedTypes()));
         }
         members.add(member);
       }
@@ -399,7 +399,9 @@ public class BslContextPlatformTypesProvider implements PlatformTypesProvider {
     } else {
       descriptor = MemberDescriptor.property(name, returnTypes, property.description());
     }
-    return descriptor.withMetadata(metadataOf(property, enLookup))
+    return descriptor
+      .withReturnTypes(withUnresolvedType(descriptor.returnTypes(), property.hasUnresolvedTypes()))
+      .withMetadata(metadataOf(property, enLookup))
       .withBilingualName(bilingualName(property.name()))
       .withBilingualDescription(BilingualString.of(
         safe(property.description()), safe(enLookup.apply(property).description())))
@@ -430,7 +432,7 @@ public class BslContextPlatformTypesProvider implements PlatformTypesProvider {
       bilingualName(method.name()),
       MemberKind.METHOD,
       BilingualString.of(safe(method.description()), safe(enLookup.apply(method).description())),
-      returnTypes,
+      withUnresolvedType(returnTypes, method.hasUnresolvedReturnTypes()),
       signatures,
       null,
       false,
@@ -697,7 +699,7 @@ public class BslContextPlatformTypesProvider implements PlatformTypesProvider {
                                                            Function<Context, String> typeNames) {
     return new ParameterDescriptor(
       bilingualName(parameter.name()),
-      typeSet(parameter.types(), typeNames),
+      withUnresolvedType(typeSet(parameter.types(), typeNames), parameter.hasUnresolvedTypes()),
       !parameter.isRequired(),
       BilingualString.of(safe(parameter.description()), safe(enLookup.apply(parameter).description())),
       safe(parameter.defaultValue()),
@@ -725,6 +727,10 @@ public class BslContextPlatformTypesProvider implements PlatformTypesProvider {
       refs.add(new TypeRef(mapRefKind(c), typeNames.apply(c)));
     }
     return TypeSet.of(refs);
+  }
+
+  private static TypeSet withUnresolvedType(TypeSet types, boolean unresolved) {
+    return unresolved ? types.union(TypeSet.of(TypeRef.UNKNOWN)) : types;
   }
 
   private static TypeKind mapRefKind(Context context) {
