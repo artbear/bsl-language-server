@@ -21,9 +21,7 @@
  */
 package com.github._1c_syntax.bsl.languageserver.diagnostics;
 
-import com.github._1c_syntax.bsl.languageserver.types.oscript.OScriptLibraryIndex;
 import com.github._1c_syntax.bsl.languageserver.context.FileType;
-import com.github._1c_syntax.bsl.languageserver.types.registry.TypeRegistry;
 import com.github._1c_syntax.bsl.languageserver.types.model.BilingualString;
 import com.github._1c_syntax.bsl.languageserver.types.model.MemberDescriptor;
 import com.github._1c_syntax.bsl.languageserver.types.model.MemberKind;
@@ -32,6 +30,8 @@ import com.github._1c_syntax.bsl.languageserver.types.model.PlatformMetadata;
 import com.github._1c_syntax.bsl.languageserver.types.model.SignatureDescriptor;
 import com.github._1c_syntax.bsl.languageserver.types.model.TypeKind;
 import com.github._1c_syntax.bsl.languageserver.types.model.TypeSet;
+import com.github._1c_syntax.bsl.languageserver.types.oscript.OScriptLibraryIndex;
+import com.github._1c_syntax.bsl.languageserver.types.registry.TypeRegistry;
 import com.github._1c_syntax.bsl.languageserver.util.CleanupContextBeforeClassAndAfterEachTestMethod;
 import com.github._1c_syntax.bsl.languageserver.util.TestUtils;
 import com.github._1c_syntax.utils.Absolute;
@@ -75,11 +75,8 @@ class MissedRequiredParameterDiagnosticTest extends AbstractDiagnosticTest<Misse
       SignatureDescriptor.of(List.of(ParameterDescriptor.of("Имя"), ParameterDescriptor.of("Значение"))))),
       FileType.BSL);
     var global = registry.intern(TypeKind.PLATFORM, "ГлобальныйКонтекст");
-    registry.registerMemberOverride(global, () -> List.of(
-      method("Лев", "Left", SignatureDescriptor.of(List.of(
-        ParameterDescriptor.of("Строка"), ParameterDescriptor.of("ЧислоСимволов")))),
-      method("Формат", "Format", SignatureDescriptor.of(List.of(
-        ParameterDescriptor.of("Значение"), ParameterDescriptor.of("ФорматнаяСтрока", true))))), FileType.BSL);
+    registry.registerMemberOverride(global, () -> List.of(method("Лев", "Left", SignatureDescriptor.of(List.of(
+      ParameterDescriptor.of("Строка"), ParameterDescriptor.of("ЧислоСимволов"))))), FileType.BSL);
   }
 
   @Test
@@ -108,15 +105,6 @@ class MissedRequiredParameterDiagnosticTest extends AbstractDiagnosticTest<Misse
     var diagnostics = getDiagnostics(document);
     assertThat(diagnostics).hasSize(2);
     assertThat(diagnostics, true).hasRange(1, 7, 1, 19).hasRange(5, 7, 5, 20);
-  }
-
-  @Test
-  void configuredPositionsRecognizeEnglishMethodNames() {
-    initServerContext();
-    registerPlatformSignatures();
-    diagnosticInstance.configure(java.util.Map.of("requiredParameters", "фОрМаТ,2"));
-    var document = TestUtils.getDocumentContext("Результат = Format(1);", context);
-    assertThat(getDiagnostics(document)).hasSize(1);
   }
 
   @Test
@@ -151,17 +139,24 @@ class MissedRequiredParameterDiagnosticTest extends AbstractDiagnosticTest<Misse
   }
 
   @Test
-  void configuredOptionalPositionsAndReset() {
-    initServerContext();
-    registerPlatformSignatures();
-    var document = TestUtils.getDocumentContext("""
-      Результат = Формат(1);
-      Результат = Формат(1, "ЧДЦ=2");
+  void sameNamedCommonModuleMethodUsesItsOwnSignature() {
+    initServerContext(Absolute.path(PATH_TO_METADATA));
+    var moduleUri = Absolute.path(PATH_TO_METADATA)
+      .resolve("CommonModules/ПервыйОбщийМодуль/Ext/Module.bsl").toUri();
+    TestUtils.getDocumentContext(moduleUri, """
+      Процедура УстановитьПараметр(Значение = 0) Экспорт
+      КонецПроцедуры
+
+      Процедура Проверить(Значение) Экспорт
+      КонецПроцедуры
       """, context);
-    diagnosticInstance.configure(java.util.Map.of("requiredParameters", " Формат,1-2 | ЧислоПрописью,2 "));
-    assertThat(getDiagnostics(document)).hasSize(1);
-    diagnosticInstance.configure(java.util.Map.of());
-    assertThat(getDiagnostics(document)).isEmpty();
+    var document = TestUtils.getDocumentContext("""
+      ПервыйОбщийМодуль.УстановитьПараметр();
+      ПервыйОбщийМодуль.Проверить();
+      """, context);
+
+    assertThat(getDiagnostics(document), true).hasSize(1)
+      .hasMessageOnRange("Укажите обязательный параметр 'Значение'", 1, 18, 29);
   }
 
   @ParameterizedTest

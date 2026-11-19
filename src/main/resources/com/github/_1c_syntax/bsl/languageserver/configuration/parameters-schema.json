@@ -1312,14 +1312,6 @@
                 "object"
             ],
             "title": "Missed a required method parameter",
-            "properties": {
-                "requiredParameters": {
-                    "description": "Additional required positions: Method,1-2 | OtherMethod,2. Positions start at 1; empty means signature requirements only.",
-                    "default": "",
-                    "type": "string",
-                    "title": "Additional required positions: Method,1-2 | OtherMethod,2. Positions start at 1; empty means signature requirements only."
-                }
-            },
             "$id": "#/definitions/MissedRequiredParameter"
         },
         "MissingCodeTryCatchEx": {

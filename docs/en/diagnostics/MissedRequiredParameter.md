@@ -3,15 +3,15 @@
 <!-- Блоки выше заполняются автоматически, не трогать -->
 ## Description
 
-Required parameters must not be omitted when calling methods, otherwise the value `Undefined` will be passed to the parameter, which the method often cannot process.
-If the value `Undefined` is valid, then you need to
-- explicitly pass a value
-- or make the parameter optional with a default value of `Undefined`.
+Omitting a required argument can cause a runtime error in a platform method. A user-defined method may receive `Undefined` for a parameter that cannot handle it. If `Undefined` is valid, pass it explicitly or declare it as the parameter's default in the user-defined method.
+
 The check uses resolved signatures of global platform functions, object and common module methods, and constructors. Unknown receivers are skipped. One overload without missing required arguments is sufficient. Default values and variadic tails do not require an argument. Local methods take precedence over global platform functions with the same name.
 
-The `requiredParameters` option can require explicit optional arguments: `Format,1-2 | NumberInWords,2`. Positions start at 1; hyphens separate individual positions, not ranges. Names are case insensitive; both platform name translations are accepted. Only known parameters of resolved signatures are affected. An empty setting retains signature requirements only.
+For platform methods, including metadata object methods, parameter requirements come from signatures loaded from the 1C Syntax Assistant (HBK). To locate these files, you can set `v8platform.binPath` to the platform's `bin` directory. The Russian and English method names use the same signature.
 
 ## Examples
+
+`Query.SetParameter("Code")` omits the required `Value` argument. The correct call is `Query.SetParameter("Code", CodeValue)`.
 
 For example
 

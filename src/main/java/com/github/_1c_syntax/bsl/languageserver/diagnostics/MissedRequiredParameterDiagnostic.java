@@ -24,14 +24,13 @@ package com.github._1c_syntax.bsl.languageserver.diagnostics;
 import com.github._1c_syntax.bsl.languageserver.context.symbol.MethodSymbol;
 import com.github._1c_syntax.bsl.languageserver.context.symbol.Symbol;
 import com.github._1c_syntax.bsl.languageserver.diagnostics.metadata.DiagnosticMetadata;
-import com.github._1c_syntax.bsl.languageserver.diagnostics.metadata.DiagnosticParameter;
-import com.github._1c_syntax.bsl.languageserver.types.TypeService;
-import com.github._1c_syntax.bsl.languageserver.types.model.MemberDescriptor;
 import com.github._1c_syntax.bsl.languageserver.diagnostics.metadata.DiagnosticSeverity;
 import com.github._1c_syntax.bsl.languageserver.diagnostics.metadata.DiagnosticTag;
 import com.github._1c_syntax.bsl.languageserver.diagnostics.metadata.DiagnosticType;
 import com.github._1c_syntax.bsl.languageserver.references.ReferenceIndex;
 import com.github._1c_syntax.bsl.languageserver.references.ReferenceResolver;
+import com.github._1c_syntax.bsl.languageserver.types.TypeService;
+import com.github._1c_syntax.bsl.languageserver.types.model.SignatureDescriptor;
 import com.github._1c_syntax.bsl.languageserver.types.symbol.ConstructorCallSymbol;
 import com.github._1c_syntax.bsl.languageserver.utils.Ranges;
 import com.github._1c_syntax.bsl.parser.BSLParser;
@@ -47,9 +46,6 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
-import java.util.TreeMap;
-import java.util.HashSet;
 
 @DiagnosticMetadata(
   type = DiagnosticType.ERROR,
@@ -64,34 +60,6 @@ import java.util.HashSet;
 public class MissedRequiredParameterDiagnostic extends AbstractVisitorDiagnostic {
 
   private final TypeService typeService;
-
-  @DiagnosticParameter(type = String.class, defaultValue = "")
-  private String requiredParameters = "";
-  private final Map<String, Set<Integer>> requiredPositions = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
-
-  @Override
-  public void configure(Map<String, Object> configuration) {
-    requiredParameters = (String) configuration.getOrDefault("requiredParameters", "");
-    requiredPositions.clear();
-    for (var entry : requiredParameters.split("\\|")) {
-      if (entry.isBlank()) {
-        continue;
-      }
-      var parts = entry.trim().split(",", -1);
-      if (parts.length != 2 || parts[0].isBlank()) {
-        throw new IllegalArgumentException("Expected Method,1-2 in requiredParameters: " + entry);
-      }
-      var positions = requiredPositions.computeIfAbsent(parts[0].trim(), key -> new HashSet<>());
-      for (var value : parts[1].trim().split("-", -1)) {
-        var position = Integer.parseInt(value.trim());
-        if (position < 1) {
-          throw new IllegalArgumentException("Parameter positions start at 1: " + entry);
-        }
-        positions.add(position);
-      }
-    }
-  }
-
   private final ReferenceIndex referenceIndex;
   private final ReferenceResolver referenceResolver;
   private final Map<Range, MethodCall> calls = new HashMap<>();
@@ -141,33 +109,18 @@ public class MissedRequiredParameterDiagnostic extends AbstractVisitorDiagnostic
     if (members.isEmpty() || members.stream().anyMatch(member -> member.descriptor().signatures().isEmpty())) {
       return false;
     }
-    var signatures = members.stream().flatMap(member -> {
-      var descriptor = member.descriptor();
-      return descriptor.signatures().stream().map(signature -> {
-        List<Parameter> parameters = new ArrayList<>();
-        for (int i = 0; i < signature.parameters().size(); i++) {
-          var parameter = signature.parameters().get(i);
-          boolean forced = isRequired(descriptor, i + 1);
-          parameters.add(new Parameter(parameter.name(), !forced
-            && (parameter.optional() || !parameter.defaultValue().isEmpty() || parameter.variadic())));
-        }
-        return parameters;
-      });
-    }).toList();
+    var signatures = members.stream()
+      .flatMap(member -> member.descriptor().signatures().stream())
+      .map(MissedRequiredParameterDiagnostic::signature)
+      .toList();
     checkSignatures(signatures, arguments(doCall), Ranges.create(node));
     return true;
-  }
-
-  private boolean isRequired(MemberDescriptor member, int position) {
-    return requiredPositions.entrySet().stream()
-      .anyMatch(entry -> member.matches(entry.getKey()) && entry.getValue().contains(position));
   }
 
   private void appendMethodCall(Token methodName, BSLParser.@Nullable DoCallContext doCallContext, ParserRuleContext node) {
     var methodCall = new MethodCall();
     methodCall.arguments = arguments(doCallContext);
     methodCall.range = Ranges.create(node);
-    methodCall.name = methodName.getText();
     calls.put(Ranges.create(methodName), methodCall);
   }
 
@@ -209,14 +162,7 @@ public class MissedRequiredParameterDiagnostic extends AbstractVisitorDiagnostic
   }
 
   private void checkMethod(MethodSymbol methodDefinition, MethodCall callInfo) {
-    var signature = signature(methodDefinition);
-    var positions = requiredPositions.getOrDefault(callInfo.name, Set.of());
-    var configuredSignature = new ArrayList<Parameter>();
-    for (int i = 0; i < signature.size(); i++) {
-      var parameter = signature.get(i);
-      configuredSignature.add(new Parameter(parameter.name(), parameter.optional() && !positions.contains(i + 1)));
-    }
-    var missedParameters = missedParameters(configuredSignature, callInfo.arguments);
+    var missedParameters = missedParameters(signature(methodDefinition), callInfo.arguments);
     if (!missedParameters.isEmpty()) {
       addDiagnostic(callInfo.range, missedParameters);
     }
@@ -247,10 +193,7 @@ public class MissedRequiredParameterDiagnostic extends AbstractVisitorDiagnostic
     }
     if (symbol instanceof ConstructorCallSymbol constructorCall) {
       return constructorCall.getConstructors().stream()
-        .map(constructor -> constructor.parameters().stream()
-          .map(parameter -> new Parameter(parameter.name(), parameter.optional() || parameter.variadic()
-            || !parameter.defaultValue().isEmpty()))
-          .toList())
+        .map(MissedRequiredParameterDiagnostic::signature)
         .toList();
     }
     return List.of();
@@ -259,6 +202,13 @@ public class MissedRequiredParameterDiagnostic extends AbstractVisitorDiagnostic
   private static List<Parameter> signature(MethodSymbol methodSymbol) {
     return methodSymbol.getParameters().stream()
       .map(parameter -> new Parameter(parameter.getName(), parameter.isOptional()))
+      .toList();
+  }
+
+  private static List<Parameter> signature(SignatureDescriptor signature) {
+    return signature.parameters().stream()
+      .map(parameter -> new Parameter(parameter.name(), parameter.optional() || parameter.variadic()
+        || !parameter.defaultValue().isEmpty()))
       .toList();
   }
 
@@ -277,7 +227,6 @@ public class MissedRequiredParameterDiagnostic extends AbstractVisitorDiagnostic
   private static class MethodCall {
     Boolean[] arguments;
     Range range;
-    String name;
   }
 
   private record Parameter(String name, boolean optional) {
