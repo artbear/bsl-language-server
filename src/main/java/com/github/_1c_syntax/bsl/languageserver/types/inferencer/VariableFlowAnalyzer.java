@@ -183,7 +183,7 @@ public class VariableFlowAnalyzer extends AbstractDocumentLifecycleClearableInde
    */
   public static final class FlowSession {
     boolean requireCompleteTypes;
-    private final Map<BSLParser.CodeBlockContext, Facts> localFacts = new IdentityHashMap<>();
+    private @Nullable Map<BSLParser.CodeBlockContext, Facts> localFacts;
     boolean contextTracking;
     boolean contextFreeDeclarations;
     boolean contextSensitive;
@@ -220,6 +220,13 @@ public class VariableFlowAnalyzer extends AbstractDocumentLifecycleClearableInde
      */
     public FlowSession(Runnable cellsChanged) {
       this.cellsChanged = cellsChanged;
+    }
+
+    private Map<BSLParser.CodeBlockContext, Facts> localFacts() {
+      if (localFacts == null) {
+        localFacts = new IdentityHashMap<>();
+      }
+      return localFacts;
     }
 
     private boolean replaceCell(VariableSymbol variable, TypeSet type) {
@@ -930,7 +937,7 @@ public class VariableFlowAnalyzer extends AbstractDocumentLifecycleClearableInde
     FlowLayout layout, FlowInputs inputs, @Nullable BooleanSupplier sharedRoot) {
     Map<BSLParser.CodeBlockContext, Facts> byBody = null;
     if (inputs.session().requireCompleteTypes) {
-      byBody = inputs.session().localFacts;
+      byBody = inputs.session().localFacts();
     } else if (inputs.cacheable()) {
       byBody = inputs.executionContext() == null
         ? factsByUri.computeIfAbsent(documentContext.getUri(), uri -> new ConcurrentHashMap<>())
