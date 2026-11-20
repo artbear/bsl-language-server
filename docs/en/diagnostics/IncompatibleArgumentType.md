@@ -1,4 +1,4 @@
-# Incompatible method argument type (IncompatibleMethodArgumentType)
+# Incompatible method argument type (IncompatibleArgumentType)
 
 <!-- The block above is generated automatically, do not edit -->
 ## Description

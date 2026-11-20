@@ -40,14 +40,14 @@ import java.util.List;
 import static com.github._1c_syntax.bsl.languageserver.util.Assertions.assertThat;
 
 @CleanupContextBeforeClassAndAfterEachTestMethod
-class IncompatibleMethodArgumentTypeDiagnosticTest
-  extends AbstractDiagnosticTest<IncompatibleMethodArgumentTypeDiagnostic> {
+class IncompatibleArgumentTypeDiagnosticTest
+  extends AbstractDiagnosticTest<IncompatibleArgumentTypeDiagnostic> {
 
   @Autowired
   private TypeRegistry typeRegistry;
 
-  IncompatibleMethodArgumentTypeDiagnosticTest() {
-    super(IncompatibleMethodArgumentTypeDiagnostic.class);
+  IncompatibleArgumentTypeDiagnosticTest() {
+    super(IncompatibleArgumentTypeDiagnostic.class);
   }
 
   @Test

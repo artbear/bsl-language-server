@@ -43,7 +43,7 @@ import java.util.stream.Collectors;
   tags = DiagnosticTag.ERROR
 )
 @RequiredArgsConstructor
-public class IncompatibleMethodArgumentTypeDiagnostic extends AbstractVisitorDiagnostic {
+public class IncompatibleArgumentTypeDiagnostic extends AbstractVisitorDiagnostic {
 
   private final MethodArgumentTypes argumentTypes;
   private MethodArgumentTypes.Session session;
