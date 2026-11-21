@@ -93,6 +93,10 @@ public class DissimilarCompositeTypeDiagnostic extends AbstractSymbolTreeDiagnos
       addFamily(families, type, "Ссылка", "Ref");
       addFamily(families, type, "Объект", "Object");
     }
+    for (var type : List.of(MDOType.INFORMATION_REGISTER, MDOType.ACCUMULATION_REGISTER,
+      MDOType.ACCOUNTING_REGISTER, MDOType.CALCULATION_REGISTER)) {
+      addFamily(families, type, "НаборЗаписей", "RecordSet");
+    }
     addFamily(families, MDOType.ENUM, "Ссылка", "Ref");
     addFamily(families, MDOType.REPORT, "Объект", "Object");
     addFamily(families, MDOType.DATA_PROCESSOR, "Объект", "Object");

@@ -62,6 +62,19 @@ class DissimilarCompositeTypeDiagnosticTest extends AbstractDiagnosticTest<Dissi
   }
 
   @Test
+  void acceptsInformationRegisterRecordSetsOfDifferentRegisters() {
+    var document = TestUtils.getDocumentContext("""
+      // Параметры:
+      //  Данные - РегистрСведенийНаборЗаписей.Товары, InformationRegisterRecordSet.Цены - набор записей.
+      Процедура Проверить(Данные)
+        Сообщить(Данные);
+      КонецПроцедуры
+      """, context);
+
+    assertThat(getDiagnostics(document)).isEmpty();
+  }
+
+  @Test
   void acceptsOptionalAndArbitraryTypesAndIgnoresInferredUnions() {
     var document = TestUtils.getDocumentContext("""
       // Параметры:
