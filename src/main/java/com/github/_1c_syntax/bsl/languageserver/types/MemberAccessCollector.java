@@ -140,7 +140,8 @@ final class MemberAccessCollector extends BSLParserBaseListener {
       return branch != null || active.isEmpty() ? Optional.of(Set.copyOf(active)) : Optional.empty();
     });
     if (contexts.filter(Set::isEmpty).isPresent()
-      || (contexts.isEmpty() && !checks.contains(MemberAccessCheckKind.EXISTENCE))) {
+      || (contexts.isEmpty() && !checks.contains(MemberAccessCheckKind.EXISTENCE)
+        && !checks.contains(MemberAccessCheckKind.RECEIVER_TYPE))) {
       return;
     }
     accesses.add(new MemberAccessSite(name, caller, contexts, unqualified, method, accessChain(name)));

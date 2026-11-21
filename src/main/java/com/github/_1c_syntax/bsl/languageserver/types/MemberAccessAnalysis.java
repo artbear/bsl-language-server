@@ -31,9 +31,13 @@ import com.github._1c_syntax.bsl.languageserver.types.model.TypeRef;
 import com.github._1c_syntax.bsl.languageserver.types.model.MemberKind;
 import com.github._1c_syntax.bsl.languageserver.types.TypeService.TypedMember;
 import com.github._1c_syntax.bsl.languageserver.utils.Ranges;
+import com.github._1c_syntax.bsl.languageserver.types.MemberAccessChecker.UntypedReceiver;
+import org.antlr.v4.runtime.tree.ParseTree;
 import org.jspecify.annotations.Nullable;
 import java.net.URI;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.IdentityHashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -52,6 +56,7 @@ final class MemberAccessAnalysis {
   private final TypeService typeService;
   private final GlobalMemberTargets globals;
   private final MemberAccessProblems problems;
+  private final Set<ParseTree> untypedChains = Collections.newSetFromMap(new IdentityHashMap<>());
 
   MemberAccessAnalysis(DocumentContext document, Set<MemberAccessCheckKind> checks, MemberAccessContexts contextData,
                        CompilationContextResolver contextResolver, TypeService typeService,
@@ -69,9 +74,31 @@ final class MemberAccessAnalysis {
     if (checks.contains(MemberAccessCheckKind.EXISTENCE)) {
       checkExistence(access);
     }
+    if (checks.contains(MemberAccessCheckKind.RECEIVER_TYPE) && !access.unqualified()) {
+      checkReceiverType(access);
+    }
     if (checks.contains(MemberAccessCheckKind.AVAILABILITY) && access.contexts().isPresent()) {
       checkAvailability(access);
     }
+  }
+
+  private void checkReceiverType(MemberAccessSite access) {
+    if (untypedChains.contains(access.chain())) {
+      return;
+    }
+    var range = Ranges.create(access.node());
+    var receiverTypes = typeService.receiverTypesQuery(documentContext, range.getStart());
+    var untyped = access.contexts()
+      .map(contexts -> contexts.stream().allMatch(context -> isUnknown(receiverTypes.apply(context))))
+      .orElseGet(() -> isUnknown(receiverTypes.apply(null)));
+    if (untyped) {
+      untypedChains.add(access.chain());
+      problems.add(new UntypedReceiver(range, access.node().getText()));
+    }
+  }
+
+  private static boolean isUnknown(TypeSet types) {
+    return types.refs().stream().allMatch(TypeRef.UNKNOWN::equals);
   }
 
   private void checkAvailability(MemberAccessSite access) {
