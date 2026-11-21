@@ -22,9 +22,14 @@
 package com.github._1c_syntax.bsl.languageserver.diagnostics;
 
 import com.github._1c_syntax.bsl.languageserver.util.TestUtils;
+import com.github._1c_syntax.bsl.types.ModuleType;
 import org.junit.jupiter.api.Test;
+
 import java.nio.file.Path;
+
 import static com.github._1c_syntax.bsl.languageserver.util.Assertions.assertThat;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.spy;
 
 class AssignToFormAttributeInNoContextDiagnosticTest
   extends AbstractDiagnosticTest<AssignToFormAttributeInNoContextDiagnostic> {
@@ -58,7 +63,13 @@ class AssignToFormAttributeInNoContextDiagnosticTest
         ПолеКартинки = "адрес";
       КонецПроцедуры
       """, context);
-    assertThat(getDiagnostics(document)).hasSize(3);
+    var diagnostics = getDiagnostics(document);
+    assertThat(diagnostics).hasSize(3);
+    var info = diagnosticInstance.getInfo();
+    assertThat(diagnostics, true)
+      .hasMessageOnRange(info.getMessage("ПолеКартинки"), 2, 2, 14)
+      .hasMessageOnRange(info.getMessage("Объект"), 3, 2, 8)
+      .hasMessageOnRange(info.getMessage("ПолеКартинки"), 8, 2, 14);
   }
 
   @Test
@@ -91,12 +102,15 @@ class AssignToFormAttributeInNoContextDiagnosticTest
   @Test
   void metadataIsRequired() {
     initServerContext();
-    var document = TestUtils.getDocumentContext("""
+    var document = spy(TestUtils.getDocumentContext(FORM.toUri(), """
       &НаСервереБезКонтекста
       Процедура Проверка()
         ПолеКартинки = "адрес";
       КонецПроцедуры
-      """, context);
+      """, context));
+    // The workspace without metadata cannot classify the URI as a form module.
+    doReturn(ModuleType.FormModule).when(document).getModuleType();
+    assertThat(document.getMdObject()).isEmpty();
     assertThat(getDiagnostics(document)).isEmpty();
   }
 }
