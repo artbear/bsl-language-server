@@ -411,7 +411,9 @@ public class OpenDataObjectInference {
         // Поле записывается и с пустым типом значения: знать, что ключ есть, — это не то же
         // самое, что знать его тип. Без имени обращение к ключу выглядит обращением к
         // несуществующему свойству, а тип значения ниоткуда взяться и не мог.
-        return incoming.withField(structureRef, field.name(), field.types());
+        return isStructureLike(structureRef.qualifiedName())
+          ? incoming.replacingField(structureRef, field.name(), field.types())
+          : incoming.withField(structureRef, field.name(), field.types());
       }
     }
     var tableRef = headRefOf(incoming, OpenDataObjectInference::isValueTableLike);

@@ -392,6 +392,35 @@ public record TypeSet(
   }
 
   /**
+   * Заменить тип поля после безусловной записи в структуру. Объединение альтернатив
+   * при слиянии ветвей выполняет {@link #union}, оно сохраняет оба возможных значения.
+   */
+  public TypeSet replacingField(TypeRef ref, String name, TypeSet types) {
+    var eagerByRef = new LinkedHashMap<>(localFields);
+    var eager = new LinkedHashMap<>(localFields.getOrDefault(ref, Map.of()));
+    var previous = eager.entrySet().stream()
+      .filter(entry -> entry.getKey().equalsIgnoreCase(name))
+      .map(Map.Entry::getValue).findFirst();
+    eager.keySet().removeIf(key -> key.equalsIgnoreCase(name));
+
+    var lazyByRef = new LinkedHashMap<>(lazyFields);
+    var lazy = new LinkedHashMap<>(lazyFields.getOrDefault(ref, Map.of()));
+    var description = previous.map(LocalField::description).orElseGet(() -> lazy.entrySet().stream()
+      .filter(entry -> entry.getKey().equalsIgnoreCase(name))
+      .map(entry -> entry.getValue().description()).findFirst().orElse(""));
+    lazy.keySet().removeIf(key -> key.equalsIgnoreCase(name));
+    if (lazy.isEmpty()) {
+      lazyByRef.remove(ref);
+    } else {
+      lazyByRef.put(ref, lazy);
+    }
+
+    eager.put(name, new LocalField(types, description));
+    eagerByRef.put(ref, eager);
+    return new TypeSet(refs.contains(ref) ? refs : addRef(ref), elementTypes, eagerByRef, lazyElements, lazyByRef, describedTypes);
+  }
+
+  /**
    * Прикрепить к указанному {@code ref} сразу несколько полей «открытого» объекта данных.
    * <p>
    * Набор неизменяемый, поэтому каждое добавление копирует уже накопленные поля: набирать
