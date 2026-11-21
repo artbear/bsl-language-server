@@ -24,5 +24,6 @@ package com.github._1c_syntax.bsl.languageserver.types;
 /** Вид проверки обращения; выключенная диагностика не требует вычислять её результат. */
 public enum MemberAccessCheckKind {
   EXISTENCE,
-  AVAILABILITY
+  AVAILABILITY,
+  RECEIVER_TYPE
 }

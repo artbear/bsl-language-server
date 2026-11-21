@@ -140,7 +140,8 @@ final class MemberAccessCollector extends BSLParserBaseListener {
       return branch != null || active.isEmpty() ? Optional.of(Set.copyOf(active)) : Optional.empty();
     });
     if (contexts.filter(Set::isEmpty).isPresent()
-      || (contexts.isEmpty() && !checks.contains(MemberAccessCheckKind.EXISTENCE))) {
+      || (contexts.isEmpty() && !checks.contains(MemberAccessCheckKind.EXISTENCE)
+        && !checks.contains(MemberAccessCheckKind.RECEIVER_TYPE))) {
       return;
     }
     accesses.add(new MemberAccessSite(name, caller, contexts, unqualified, method, accessChain(name)));
@@ -153,7 +154,10 @@ final class MemberAccessCollector extends BSLParserBaseListener {
    */
   private static ParseTree accessChain(TerminalNode node) {
     for (var parent = node.getParent(); parent != null; parent = parent.getParent()) {
-      if (parent instanceof BSLParser.ComplexIdentifierContext || parent instanceof BSLParser.CallStatementContext) {
+      if (parent instanceof BSLParser.ComplexIdentifierContext
+        || parent instanceof BSLParser.CallStatementContext
+        || parent instanceof BSLParser.LValueContext
+        || (parent instanceof BSLParser.MemberContext member && member.LPAREN() != null)) {
         return parent;
       }
     }

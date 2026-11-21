@@ -55,9 +55,12 @@ public class MemberAccessChecker {
   private final GlobalScopeProvider globalScopeProvider;
 
   /**
-   * Доказанная проблема обращения; допустимые и неразрешённые обращения проблем не создают.
+   * Проблема обращения, найденная одной из запрошенных проверок.
    */
-  public sealed interface Problem permits UnknownMember, UnavailableMember {
+  public sealed interface Problem permits UnknownMember, UnavailableMember, UntypedReceiver {
+  }
+
+  public record UntypedReceiver(Range range, String name) implements Problem {
   }
 
   /**
