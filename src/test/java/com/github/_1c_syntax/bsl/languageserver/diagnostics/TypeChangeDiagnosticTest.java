@@ -21,10 +21,14 @@
  */
 package com.github._1c_syntax.bsl.languageserver.diagnostics;
 
+import com.github._1c_syntax.bsl.languageserver.diagnostics.metadata.DiagnosticMessage;
 import com.github._1c_syntax.bsl.languageserver.util.TestUtils;
+import com.github._1c_syntax.bsl.languageserver.utils.Ranges;
+import org.eclipse.lsp4j.Diagnostic;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.tuple;
 
 class TypeChangeDiagnosticTest extends AbstractDiagnosticTest<TypeChangeDiagnostic> {
 
@@ -43,8 +47,45 @@ class TypeChangeDiagnosticTest extends AbstractDiagnosticTest<TypeChangeDiagnost
       """, context);
 
     assertThat(getDiagnostics(document))
-      .extracting(diagnostic -> diagnostic.getRange().getStart().getLine())
-      .containsExactly(3, 6);
+      .extracting(Diagnostic::getRange, diagnostic -> DiagnosticMessage.getStringValue(diagnostic.getMessage()))
+      .containsExactly(
+        tuple(Ranges.create(3, 2, 3, 6), "Используйте отдельное имя для значения другого типа вместо «Итог»"),
+        tuple(Ranges.create(6, 9, 6, 13), "Используйте отдельное имя для значения другого типа вместо «ключ»"));
+  }
+
+  @Test
+  void usesTheLastDefiniteValueAfterAnInsert() {
+    var document = TestUtils.getDocumentContext("""
+      Процедура Проверить()
+        Данные = Новый Структура("Ключ", 0);
+        Данные.Вставить("КЛЮЧ", "текст");
+        Данные.Ключ = 1;
+      КонецПроцедуры
+      """, context);
+
+    assertThat(getDiagnostics(document))
+      .extracting(Diagnostic::getRange, diagnostic -> DiagnosticMessage.getStringValue(diagnostic.getMessage()))
+      .containsExactly(tuple(Ranges.create(3, 9, 3, 13),
+        "Используйте отдельное имя для значения другого типа вместо «Ключ»"));
+  }
+
+  @Test
+  void acceptsStructureWithAnUncertainReceiverAlternative() {
+    var document = TestUtils.getDocumentContext("""
+      // Параметры:
+      //  Условие - Булево - ветка.
+      //  ВнешниеДанные - Произвольный - данные вызывающего кода.
+      Процедура Проверить(Условие, ВнешниеДанные)
+        Если Условие Тогда
+          Данные = Новый Структура("Ключ", 0);
+        Иначе
+          Данные = ВнешниеДанные;
+        КонецЕсли;
+        Данные.Ключ = "текст";
+      КонецПроцедуры
+      """, context);
+
+    assertThat(getDiagnostics(document)).isEmpty();
   }
 
   @Test

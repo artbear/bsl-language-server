@@ -83,10 +83,9 @@ public class TypeChangeDiagnostic extends AbstractVisitorDiagnostic {
 
   private TypeSet structureKeyTypes(TerminalNode property) {
     var receiver = typeService.receiverTypesAt(documentContext, Ranges.create(property).getStart());
-    return receiver.refs().stream()
-      .filter(type -> type.canonicalKey().equals("структура") || type.canonicalKey().equals("structure"))
-      .map(type -> receiver.retaining(type).getFieldTypes(property.getText()))
-      .reduce(TypeSet.EMPTY, TypeSet::union);
+    var knownStructure = !receiver.isEmpty() && receiver.refs().stream()
+      .allMatch(type -> type.canonicalKey().equals("структура") || type.canonicalKey().equals("structure"));
+    return knownStructure ? receiver.getFieldTypes(property.getText()) : TypeSet.EMPTY;
   }
 
   private void checkAssignment(TerminalNode target, TypeSet previous, TypeSet assigned) {
