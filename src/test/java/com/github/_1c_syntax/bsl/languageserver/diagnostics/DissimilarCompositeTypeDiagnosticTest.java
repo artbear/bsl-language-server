@@ -49,6 +49,19 @@ class DissimilarCompositeTypeDiagnosticTest extends AbstractDiagnosticTest<Dissi
   }
 
   @Test
+  void acceptsCatalogReferencesWithoutConfigurationMetadata() {
+    var document = TestUtils.getDocumentContext("""
+      // Параметры:
+      //  Объект - СправочникСсылка.Товары, CatalogRef.Контрагенты - ссылка.
+      Процедура Проверить(Объект)
+        Сообщить(Объект);
+      КонецПроцедуры
+      """, context);
+
+    assertThat(getDiagnostics(document)).isEmpty();
+  }
+
+  @Test
   void acceptsOptionalAndArbitraryTypesAndIgnoresInferredUnions() {
     var document = TestUtils.getDocumentContext("""
       // Параметры:

@@ -28,10 +28,15 @@ import com.github._1c_syntax.bsl.languageserver.diagnostics.metadata.DiagnosticS
 import com.github._1c_syntax.bsl.languageserver.diagnostics.metadata.DiagnosticTag;
 import com.github._1c_syntax.bsl.languageserver.diagnostics.metadata.DiagnosticType;
 import com.github._1c_syntax.bsl.languageserver.types.index.SymbolTypeIndex;
-import com.github._1c_syntax.bsl.languageserver.types.model.TypeKind;
 import com.github._1c_syntax.bsl.languageserver.types.model.TypeRef;
 import com.github._1c_syntax.bsl.languageserver.types.model.TypeSet;
+import com.github._1c_syntax.bsl.types.MDOType;
 import lombok.RequiredArgsConstructor;
+
+import java.util.HashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 
 @DiagnosticMetadata(
   type = DiagnosticType.CODE_SMELL,
@@ -43,6 +48,8 @@ import lombok.RequiredArgsConstructor;
 )
 @RequiredArgsConstructor
 public class DissimilarCompositeTypeDiagnostic extends AbstractSymbolTreeDiagnostic {
+
+  private static final Map<String, String> METADATA_FAMILIES = metadataFamilies();
 
   private final SymbolTypeIndex symbolTypeIndex;
 
@@ -74,10 +81,28 @@ public class DissimilarCompositeTypeDiagnostic extends AbstractSymbolTreeDiagnos
   private static String typeFamily(TypeRef type) {
     var name = type.canonicalKey();
     var separator = name.indexOf('.');
-    // Concrete metadata types in one family share the same interface, e.g. CatalogRef.
-    if (type.kind() == TypeKind.CONFIGURATION && separator > 0) {
-      return name.substring(0, separator);
+    var prefix = separator < 0 ? name : name.substring(0, separator);
+    return METADATA_FAMILIES.getOrDefault(prefix, name);
+  }
+
+  private static Map<String, String> metadataFamilies() {
+    var families = new HashMap<String, String>();
+    for (var type : List.of(MDOType.CATALOG, MDOType.DOCUMENT, MDOType.CHART_OF_CHARACTERISTIC_TYPES,
+      MDOType.CHART_OF_ACCOUNTS, MDOType.CHART_OF_CALCULATION_TYPES, MDOType.BUSINESS_PROCESS,
+      MDOType.TASK, MDOType.EXCHANGE_PLAN)) {
+      addFamily(families, type, "Ссылка", "Ref");
+      addFamily(families, type, "Объект", "Object");
     }
-    return name;
+    addFamily(families, MDOType.ENUM, "Ссылка", "Ref");
+    addFamily(families, MDOType.REPORT, "Объект", "Object");
+    addFamily(families, MDOType.DATA_PROCESSOR, "Объект", "Object");
+    return Map.copyOf(families);
+  }
+
+  private static void addFamily(Map<String, String> families, MDOType type, String suffixRu, String suffixEn) {
+    var names = type.fullName();
+    var family = (names.getRu() + suffixRu).toLowerCase(Locale.ROOT);
+    families.put(family, family);
+    families.put((names.getEn() + suffixEn).toLowerCase(Locale.ROOT), family);
   }
 }
