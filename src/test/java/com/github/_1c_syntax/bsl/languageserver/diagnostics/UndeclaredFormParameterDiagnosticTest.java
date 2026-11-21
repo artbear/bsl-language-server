@@ -21,6 +21,7 @@
  */
 package com.github._1c_syntax.bsl.languageserver.diagnostics;
 
+import com.github._1c_syntax.bsl.languageserver.diagnostics.metadata.DiagnosticMessage;
 import com.github._1c_syntax.bsl.languageserver.util.CleanupContextBeforeClassAndAfterClass;
 import com.github._1c_syntax.bsl.languageserver.util.TestUtils;
 import com.github._1c_syntax.bsl.languageserver.utils.Ranges;
@@ -30,6 +31,7 @@ import org.junit.jupiter.api.Test;
 import java.nio.file.Path;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.tuple;
 
 @CleanupContextBeforeClassAndAfterClass
 class UndeclaredFormParameterDiagnosticTest extends AbstractDiagnosticTest<UndeclaredFormParameterDiagnostic> {
@@ -50,8 +52,10 @@ class UndeclaredFormParameterDiagnosticTest extends AbstractDiagnosticTest<Undec
       КонецПроцедуры
       """, context);
 
-    assertThat(getDiagnostics(document)).extracting(Diagnostic::getRange)
-      .containsExactly(Ranges.create(2, 23, 2, 42));
+    assertThat(getDiagnostics(document))
+      .extracting(Diagnostic::getRange, diagnostic -> DiagnosticMessage.getStringValue(diagnostic.getMessage()))
+      .containsExactly(tuple(Ranges.create(2, 23, 2, 42),
+        "Объявите параметр «НеописанныйПараметр» в редакторе формы"));
   }
 
   @Test
