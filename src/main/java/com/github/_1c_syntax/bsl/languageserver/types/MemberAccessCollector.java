@@ -154,7 +154,10 @@ final class MemberAccessCollector extends BSLParserBaseListener {
    */
   private static ParseTree accessChain(TerminalNode node) {
     for (var parent = node.getParent(); parent != null; parent = parent.getParent()) {
-      if (parent instanceof BSLParser.ComplexIdentifierContext || parent instanceof BSLParser.CallStatementContext) {
+      if (parent instanceof BSLParser.ComplexIdentifierContext
+        || parent instanceof BSLParser.CallStatementContext
+        || parent instanceof BSLParser.LValueContext
+        || (parent instanceof BSLParser.MemberContext member && member.LPAREN() != null)) {
         return parent;
       }
     }

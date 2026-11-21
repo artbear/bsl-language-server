@@ -48,6 +48,35 @@ class UntypedMemberAccessDiagnosticTest extends AbstractDiagnosticTest<UntypedMe
   }
 
   @Test
+  void treatsAnAssignmentTargetAsOneChainAndChecksItsIndexSeparately() {
+    var statement = "  Вход.Первое[Другой.Индекс].Последнее = 1;";
+    var document = TestUtils.getDocumentContext("""
+      Процедура Проверить(Вход, Другой)
+      %s
+      КонецПроцедуры
+      """.formatted(statement), context);
+
+    assertThat(getDiagnostics(document))
+      .extracting(diagnostic -> diagnostic.getRange().getStart().getCharacter())
+      .containsExactly(statement.indexOf("Первое"), statement.indexOf("Индекс"));
+  }
+
+  @Test
+  void checksIndependentParenthesizedReceiversInArguments() {
+    var statement = "  Соотв.Вставить((Вход).Первое, (Другой).Второе);";
+    var document = TestUtils.getDocumentContext("""
+      Процедура Проверить(Вход, Другой)
+        Соотв = Новый Соответствие;
+      %s
+      КонецПроцедуры
+      """.formatted(statement), context);
+
+    assertThat(getDiagnostics(document))
+      .extracting(diagnostic -> diagnostic.getRange().getStart().getCharacter())
+      .containsExactly(statement.indexOf("Первое"), statement.indexOf("Второе"));
+  }
+
+  @Test
   void respectsAnExplicitArbitraryType() {
     var document = TestUtils.getDocumentContext("""
       // Параметры:
