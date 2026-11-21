@@ -22,6 +22,8 @@
 package com.github._1c_syntax.bsl.languageserver.diagnostics;
 
 import com.github._1c_syntax.bsl.languageserver.util.TestUtils;
+import com.github._1c_syntax.bsl.languageserver.utils.Ranges;
+import org.eclipse.lsp4j.Diagnostic;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -40,12 +42,8 @@ class DissimilarCompositeTypeDiagnosticTest extends AbstractDiagnosticTest<Dissi
       КонецФункции
       """, context);
 
-    assertThat(getDiagnostics(document))
-      .extracting(diagnostic -> diagnostic.getRange().getStart().getLine())
-      .containsExactly(4, 4);
-    assertThat(getDiagnostics(document))
-      .extracting(diagnostic -> diagnostic.getRange().getStart().getCharacter())
-      .containsExactlyInAnyOrder(8, 18);
+    assertThat(getDiagnostics(document)).extracting(Diagnostic::getRange)
+      .containsExactlyInAnyOrder(Ranges.create(4, 8, 4, 17), Ranges.create(4, 18, 4, 26));
   }
 
   @Test
