@@ -30,14 +30,18 @@ import com.github._1c_syntax.bsl.languageserver.diagnostics.metadata.DiagnosticT
 import com.github._1c_syntax.bsl.languageserver.diagnostics.metadata.DiagnosticType;
 import com.github._1c_syntax.bsl.languageserver.types.TypeService;
 import com.github._1c_syntax.bsl.languageserver.types.inferencer.ExpressionTypeInferencer;
+import com.github._1c_syntax.bsl.languageserver.types.inferencer.OpenDataObjectInference;
 import com.github._1c_syntax.bsl.languageserver.types.model.TypeRef;
 import com.github._1c_syntax.bsl.languageserver.types.model.TypeSet;
 import com.github._1c_syntax.bsl.languageserver.utils.Ranges;
+import com.github._1c_syntax.bsl.languageserver.utils.expressiontree.BinaryOperationNode;
+import com.github._1c_syntax.bsl.languageserver.utils.expressiontree.BslExpression;
+import com.github._1c_syntax.bsl.languageserver.utils.expressiontree.BslOperator;
 import com.github._1c_syntax.bsl.languageserver.utils.expressiontree.ExpressionTreeBuildingVisitor;
 import com.github._1c_syntax.bsl.parser.BSLParser;
 import lombok.RequiredArgsConstructor;
 import org.antlr.v4.runtime.tree.ParseTree;
-import org.antlr.v4.runtime.tree.TerminalNode;
+import org.eclipse.lsp4j.Range;
 
 import java.util.Collections;
 import java.util.Set;
@@ -70,29 +74,47 @@ public class TypeChangeDiagnostic extends AbstractVisitorDiagnostic {
       var name = target.IDENTIFIER();
       documentContext.getSymbolTree().getVariableSymbolInScope(target, name.getText())
         .filter(variable -> variable.getScope() instanceof MethodSymbol && variable.getKind() != VariableKind.PARAMETER)
-        .ifPresent(variable -> checkAssignment(name,
+        .ifPresent(variable -> checkAssignment(Ranges.create(name), name.getText(),
           typeService.typesOfVariableAt(variable, Ranges.create(name).getStart()),
           inferencer.infer(value, documentContext)));
     } else if (acceptor != null && acceptor.accessProperty() != null && acceptor.accessProperty().IDENTIFIER() != null) {
       var property = acceptor.accessProperty().IDENTIFIER();
-      checkAssignment(property, structureKeyTypes(property), inferencer.infer(value, documentContext));
+      var range = Ranges.create(property);
+      var receiver = typeService.receiverTypesAt(documentContext, range.getStart());
+      checkAssignment(range, property.getText(), structureKeyTypes(receiver, property.getText()),
+        inferencer.infer(value, documentContext));
+    } else if (acceptor != null && acceptor.accessIndex() != null) {
+      checkIndexAssignment(target, acceptor.accessIndex(), value);
     }
 
     return ctx;
   }
 
-  private TypeSet structureKeyTypes(TerminalNode property) {
-    var receiver = typeService.receiverTypesAt(documentContext, Ranges.create(property).getStart());
-    var knownStructure = !receiver.isEmpty() && receiver.refs().stream()
-      .allMatch(type -> type.canonicalKey().equals("структура") || type.canonicalKey().equals("structure"));
-    return knownStructure ? receiver.getFieldTypes(property.getText()) : TypeSet.EMPTY;
+  private void checkIndexAssignment(BSLParser.LValueContext target, BSLParser.AccessIndexContext index,
+                                    BslExpression value) {
+    if (!(ExpressionTreeBuildingVisitor.buildExpressionTree(target) instanceof BinaryOperationNode access)
+      || access.getOperator() != BslOperator.INDEX_ACCESS || access.getRepresentingAst() != index) {
+      return;
+    }
+    var key = OpenDataObjectInference.stringLiteralOf(access.getRight());
+    if (key != null) {
+      var receiver = inferencer.infer(access.getLeft(), documentContext);
+      checkAssignment(Ranges.create(index.expression()), key, structureKeyTypes(receiver, key),
+        inferencer.infer(value, documentContext));
+    }
   }
 
-  private void checkAssignment(TerminalNode target, TypeSet previous, TypeSet assigned) {
+  private static TypeSet structureKeyTypes(TypeSet receiver, String key) {
+    var knownStructure = !receiver.isEmpty() && receiver.refs().stream()
+      .allMatch(type -> type.canonicalKey().equals("структура") || type.canonicalKey().equals("structure"));
+    return knownStructure ? receiver.getFieldTypes(key) : TypeSet.EMPTY;
+  }
+
+  private void checkAssignment(Range range, String key, TypeSet previous, TypeSet assigned) {
     var before = concreteTypes(previous);
     var after = concreteTypes(assigned);
     if (!before.isEmpty() && !after.isEmpty() && Collections.disjoint(before, after)) {
-      diagnosticStorage.addDiagnostic(target, info.getMessage(target.getText()));
+      diagnosticStorage.addDiagnostic(range, info.getMessage(key));
     }
   }
 

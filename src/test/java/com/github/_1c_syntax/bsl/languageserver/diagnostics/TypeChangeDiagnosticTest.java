@@ -54,6 +54,27 @@ class TypeChangeDiagnosticTest extends AbstractDiagnosticTest<TypeChangeDiagnost
   }
 
   @Test
+  void checksLiteralStructureIndexesAndIgnoresComputedKeys() {
+    var document = TestUtils.getDocumentContext("""
+      Процедура Проверить(Ключ)
+        Данные = Новый Структура("Ключ", 0);
+        Данные["КЛЮЧ"] = 1;
+        Данные["ключ"] = "текст";
+        Данные[Ключ] = "текст";
+        Данные["Кл" + "юч"] = "текст";
+        Данные["НовыйКлюч"] = "текст";
+        Соответствие = Новый Соответствие;
+        Соответствие["ключ"] = "текст";
+      КонецПроцедуры
+      """, context);
+
+    assertThat(getDiagnostics(document))
+      .extracting(Diagnostic::getRange, diagnostic -> DiagnosticMessage.getStringValue(diagnostic.getMessage()))
+      .containsExactly(tuple(Ranges.create(3, 9, 3, 15),
+        "Используйте отдельное имя для значения другого типа вместо «ключ»"));
+  }
+
+  @Test
   void usesTheLastDefiniteValueAfterAnInsert() {
     var document = TestUtils.getDocumentContext("""
       Процедура Проверить()
