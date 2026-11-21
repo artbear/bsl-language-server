@@ -34,6 +34,8 @@ import com.github._1c_syntax.bsl.parser.BSLParser;
 import com.github._1c_syntax.bsl.parser.description.MethodDescription;
 import lombok.RequiredArgsConstructor;
 
+import java.util.regex.Pattern;
+
 @DiagnosticMetadata(
   type = DiagnosticType.CODE_SMELL,
   severity = DiagnosticSeverity.MAJOR,
@@ -45,12 +47,14 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class MissingTypeDescriptionDiagnostic extends AbstractSymbolTreeDiagnostic {
 
+  private static final Pattern DESCRIPTION_LINK = Pattern.compile("(?iu)(?:см\\.|see)\\h+[^\\r\\n]+");
+
   private final ReferenceIndex referenceIndex;
 
   @Override
   public void visitMethod(MethodSymbol method) {
     var description = method.getDescription();
-    if (description.filter(value -> !value.getLinks().isEmpty()).isPresent()) {
+    if (description.filter(MissingTypeDescriptionDiagnostic::delegatesDescription).isPresent()) {
       return;
     }
     if (method.isExport() || !hasDirectLocalCall(method)) {
@@ -64,6 +68,11 @@ public class MissingTypeDescriptionDiagnostic extends AbstractSymbolTreeDiagnost
       && description.map(MethodDescription::getReturnedValue).filter(types -> !types.isEmpty()).isEmpty()) {
       diagnosticStorage.addDiagnostic(method.getSubNameRange(), info.getResourceString("missingReturnType"));
     }
+  }
+
+  private static boolean delegatesDescription(MethodDescription description) {
+    return description.getParameters().isEmpty() && description.getReturnedValue().isEmpty()
+      && !description.getLinks().isEmpty() && DESCRIPTION_LINK.matcher(description.getPurposeDescription()).matches();
   }
 
   private boolean hasDirectLocalCall(MethodSymbol method) {

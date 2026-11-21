@@ -21,10 +21,14 @@
  */
 package com.github._1c_syntax.bsl.languageserver.diagnostics;
 
+import com.github._1c_syntax.bsl.languageserver.diagnostics.metadata.DiagnosticMessage;
 import com.github._1c_syntax.bsl.languageserver.util.TestUtils;
+import com.github._1c_syntax.bsl.languageserver.utils.Ranges;
+import org.eclipse.lsp4j.Diagnostic;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.tuple;
 
 class MissingTypeDescriptionDiagnosticTest extends AbstractDiagnosticTest<MissingTypeDescriptionDiagnostic> {
 
@@ -45,8 +49,10 @@ class MissingTypeDescriptionDiagnosticTest extends AbstractDiagnosticTest<Missin
       """, context);
 
     assertThat(getDiagnostics(document))
-      .extracting(diagnostic -> diagnostic.getRange().getStart().getCharacter())
-      .containsExactlyInAnyOrder(8, 17);
+      .extracting(Diagnostic::getRange, diagnostic -> DiagnosticMessage.getStringValue(diagnostic.getMessage()))
+      .containsExactlyInAnyOrder(
+        tuple(Ranges.create(0, 8, 0, 16), "Опишите тип возвращаемого значения"),
+        tuple(Ranges.create(0, 17, 0, 23), "Опишите тип параметра «Данные»"));
   }
 
   @Test
@@ -66,7 +72,29 @@ class MissingTypeDescriptionDiagnosticTest extends AbstractDiagnosticTest<Missin
       """, context);
 
     assertThat(getDiagnostics(document))
-      .extracting(diagnostic -> diagnostic.getRange().getStart().getLine())
-      .containsExactly(8);
+      .extracting(Diagnostic::getRange, diagnostic -> DiagnosticMessage.getStringValue(diagnostic.getMessage()))
+      .containsExactly(tuple(Ranges.create(8, 27, 8, 33), "Опишите тип параметра «Данные»"));
+  }
+
+  @Test
+  void preservesMissingTypesWhenOnlyOneParameterUsesASeeLink() {
+    var document = TestUtils.getDocumentContext("""
+      // Параметры:
+      //  Вход - См. Документированная
+      Функция Частичная(Вход, Остаток) Экспорт
+        Возврат 1;
+      КонецФункции
+
+      // См. Документированная
+      Функция Переиспользует(Вход) Экспорт
+        Возврат 1;
+      КонецФункции
+      """, context);
+
+    assertThat(getDiagnostics(document))
+      .extracting(Diagnostic::getRange, diagnostic -> DiagnosticMessage.getStringValue(diagnostic.getMessage()))
+      .containsExactlyInAnyOrder(
+        tuple(Ranges.create(2, 8, 2, 17), "Опишите тип возвращаемого значения"),
+        tuple(Ranges.create(2, 24, 2, 31), "Опишите тип параметра «Остаток»"));
   }
 }
