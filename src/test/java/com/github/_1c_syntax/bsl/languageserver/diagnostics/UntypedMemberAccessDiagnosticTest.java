@@ -22,6 +22,8 @@
 package com.github._1c_syntax.bsl.languageserver.diagnostics;
 
 import com.github._1c_syntax.bsl.languageserver.util.TestUtils;
+import com.github._1c_syntax.bsl.languageserver.utils.Ranges;
+import org.eclipse.lsp4j.Diagnostic;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -57,8 +59,8 @@ class UntypedMemberAccessDiagnosticTest extends AbstractDiagnosticTest<UntypedMe
       """.formatted(statement), context);
 
     assertThat(getDiagnostics(document))
-      .extracting(diagnostic -> diagnostic.getRange().getStart().getCharacter())
-      .containsExactly(statement.indexOf("Первое"), statement.indexOf("Индекс"));
+      .extracting(Diagnostic::getRange)
+      .containsExactly(Ranges.create(1, 7, 1, 13), Ranges.create(1, 21, 1, 27));
   }
 
   @Test
@@ -72,8 +74,8 @@ class UntypedMemberAccessDiagnosticTest extends AbstractDiagnosticTest<UntypedMe
       """.formatted(statement), context);
 
     assertThat(getDiagnostics(document))
-      .extracting(diagnostic -> diagnostic.getRange().getStart().getCharacter())
-      .containsExactly(statement.indexOf("Первое"), statement.indexOf("Второе"));
+      .extracting(Diagnostic::getRange)
+      .containsExactly(Ranges.create(2, 24, 2, 30), Ranges.create(2, 41, 2, 47));
   }
 
   @Test
