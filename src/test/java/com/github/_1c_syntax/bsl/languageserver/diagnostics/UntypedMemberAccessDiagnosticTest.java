@@ -21,12 +21,14 @@
  */
 package com.github._1c_syntax.bsl.languageserver.diagnostics;
 
+import com.github._1c_syntax.bsl.languageserver.diagnostics.metadata.DiagnosticMessage;
 import com.github._1c_syntax.bsl.languageserver.util.TestUtils;
 import com.github._1c_syntax.bsl.languageserver.utils.Ranges;
 import org.eclipse.lsp4j.Diagnostic;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.tuple;
 
 class UntypedMemberAccessDiagnosticTest extends AbstractDiagnosticTest<UntypedMemberAccessDiagnostic> {
 
@@ -59,8 +61,10 @@ class UntypedMemberAccessDiagnosticTest extends AbstractDiagnosticTest<UntypedMe
       """.formatted(statement), context);
 
     assertThat(getDiagnostics(document))
-      .extracting(Diagnostic::getRange)
-      .containsExactly(Ranges.create(1, 7, 1, 13), Ranges.create(1, 21, 1, 27));
+      .extracting(Diagnostic::getRange, diagnostic -> DiagnosticMessage.getStringValue(diagnostic.getMessage()))
+      .containsExactly(
+        tuple(Ranges.create(1, 7, 1, 13), "Уточните тип получателя при обращении к члену «Первое»"),
+        tuple(Ranges.create(1, 21, 1, 27), "Уточните тип получателя при обращении к члену «Индекс»"));
   }
 
   @Test
@@ -74,8 +78,10 @@ class UntypedMemberAccessDiagnosticTest extends AbstractDiagnosticTest<UntypedMe
       """.formatted(statement), context);
 
     assertThat(getDiagnostics(document))
-      .extracting(Diagnostic::getRange)
-      .containsExactly(Ranges.create(2, 24, 2, 30), Ranges.create(2, 41, 2, 47));
+      .extracting(Diagnostic::getRange, diagnostic -> DiagnosticMessage.getStringValue(diagnostic.getMessage()))
+      .containsExactly(
+        tuple(Ranges.create(2, 24, 2, 30), "Уточните тип получателя при обращении к члену «Первое»"),
+        tuple(Ranges.create(2, 41, 2, 47), "Уточните тип получателя при обращении к члену «Второе»"));
   }
 
   @Test
