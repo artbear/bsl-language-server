@@ -201,5 +201,8 @@
 			</Type>
 			<KeyParameter>true</KeyParameter>
 		</Parameter>
+		<Parameter name="НачальныеДанные">
+			<Type/>
+		</Parameter>
 	</Parameters>
 </Form>
