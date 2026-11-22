@@ -32,8 +32,10 @@ import com.github._1c_syntax.bsl.languageserver.types.CommentTypeResolver;
 import com.github._1c_syntax.bsl.languageserver.types.index.SymbolTypeIndex;
 import com.github._1c_syntax.bsl.languageserver.types.inferencer.ExpressionTypeInferencer;
 import com.github._1c_syntax.bsl.languageserver.types.inferencer.OpenDataObjectInference;
+import com.github._1c_syntax.bsl.languageserver.types.model.TypeKind;
 import com.github._1c_syntax.bsl.languageserver.types.model.TypeRef;
 import com.github._1c_syntax.bsl.languageserver.types.model.TypeSet;
+import com.github._1c_syntax.bsl.languageserver.types.registry.TypeRegistry;
 import com.github._1c_syntax.bsl.languageserver.utils.expressiontree.BinaryOperationNode;
 import com.github._1c_syntax.bsl.languageserver.utils.expressiontree.BslExpression;
 import com.github._1c_syntax.bsl.languageserver.utils.expressiontree.BslOperator;
@@ -61,6 +63,7 @@ public class DeclaredTypeMismatchDiagnostic extends AbstractVisitorDiagnostic {
   private final CommentTypeResolver comments;
   private final SymbolTypeIndex symbols;
   private final ExpressionTypeInferencer inferencer;
+  private final TypeRegistry typeRegistry;
 
   @Override
   public ParseTree visitCallStatement(BSLParser.CallStatementContext ctx) {
@@ -95,11 +98,11 @@ public class DeclaredTypeMismatchDiagnostic extends AbstractVisitorDiagnostic {
     }
 
     var declared = declaredTypes(statement, name.getText());
-    if (declared.isEmpty() || declared.refs().stream().anyMatch(DeclaredTypeMismatchDiagnostic::isUncertain)) {
+    if (declared.isEmpty() || declared.refs().stream().anyMatch(this::isUncertain)) {
       return;
     }
     var field = declared.getFieldTypes(key);
-    if (field.isEmpty() || field.refs().stream().anyMatch(DeclaredTypeMismatchDiagnostic::isUncertain)) {
+    if (field.isEmpty() || field.refs().stream().anyMatch(this::isUncertain)) {
       return;
     }
     var assigned = inferencer.infer(value, documentContext);
@@ -129,7 +132,8 @@ public class DeclaredTypeMismatchDiagnostic extends AbstractVisitorDiagnostic {
       ? OpenDataObjectInference.stringLiteralOf(node) : null;
   }
 
-  private static boolean isUncertain(TypeRef type) {
-    return type.equals(TypeRef.UNKNOWN) || type.equals(TypeRef.ANY);
+  private boolean isUncertain(TypeRef type) {
+    return type.equals(TypeRef.UNKNOWN) || type.equals(TypeRef.ANY)
+      || (type.kind() == TypeKind.USER && typeRegistry.resolve(type.kind(), type.qualifiedName()).isEmpty());
   }
 }

@@ -22,15 +22,20 @@
 package com.github._1c_syntax.bsl.languageserver.diagnostics;
 
 import com.github._1c_syntax.bsl.languageserver.diagnostics.metadata.DiagnosticMessage;
+import com.github._1c_syntax.bsl.languageserver.types.registry.TypeRegistry;
 import com.github._1c_syntax.bsl.languageserver.util.TestUtils;
 import com.github._1c_syntax.bsl.languageserver.utils.Ranges;
 import org.eclipse.lsp4j.Diagnostic;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.tuple;
 
 class DeclaredTypeMismatchDiagnosticTest extends AbstractDiagnosticTest<DeclaredTypeMismatchDiagnostic> {
+
+  @Autowired
+  private TypeRegistry typeRegistry;
 
   @Test
   void checksAFieldAgainstTheDeclaredContract() {
@@ -55,6 +60,51 @@ class DeclaredTypeMismatchDiagnosticTest extends AbstractDiagnosticTest<Declared
       .containsExactly(tuple(Ranges.create(4, 27, 4, 34), message),
         tuple(Ranges.create(5, 17, 5, 24), message),
         tuple(Ranges.create(6, 20, 6, 27), message));
+  }
+
+  @Test
+  void resolvesFieldDescriptionsOfLocalVariables() {
+    var document = TestUtils.getDocumentContext("""
+      // Возвращаемое значение:
+      //   Структура:
+      //     * Сумма - Число
+      Функция НовыеДанные()
+        Возврат Новый Структура("Сумма", 0);
+      КонецФункции
+
+      Процедура Проверить()
+        Перем Данные; // см. НовыеДанные
+        Данные = НовыеДанные();
+        Данные.Вставить("Сумма", "текст");
+      КонецПроцедуры
+      """, context);
+
+    assertThat(getDiagnostics(document)).extracting(Diagnostic::getRange)
+      .containsExactly(Ranges.create(10, 27, 10, 34));
+  }
+
+  @Test
+  void checksRegisteredUserTypesAndIgnoresUnresolvedNames() {
+    var document = TestUtils.getDocumentContext("""
+      // Параметры:
+      //  Данные - Структура:
+      //  * Неизвестное - НеЗарегистрированныйТипПроверки
+      //  * Известное - ПользовательскийТипПроверкиТест
+      Процедура Проверить(Данные)
+        Данные.Неизвестное = "текст";
+        Данные.Известное = "текст";
+      КонецПроцедуры
+      """, context);
+    var typeName = "ПользовательскийТипПроверкиТест";
+    var declaration = document.getSymbolTree().getMethodSymbol("Проверить").orElseThrow();
+    typeRegistry.registerUserType(typeName, declaration, document.getFileType());
+    try {
+      assertThat(getDiagnostics(document))
+        .extracting(Diagnostic::getRange, diagnostic -> DiagnosticMessage.getStringValue(diagnostic.getMessage()))
+        .containsExactly(tuple(Ranges.create(6, 21, 6, 28), "Присвойте полю «Известное» значение объявленного типа"));
+    } finally {
+      typeRegistry.unregisterUserType(typeName);
+    }
   }
 
   @Test
