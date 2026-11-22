@@ -108,6 +108,25 @@ class DeclaredTypeMismatchDiagnosticTest extends AbstractDiagnosticTest<Declared
   }
 
   @Test
+  void requiresKnownTypesForAllAlternativesOfAConditionalValue() {
+    var document = TestUtils.getDocumentContext("""
+      // Параметры:
+      //  Данные - Структура:
+      //  * Сумма - Число
+      Процедура Проверить(Данные, Условие)
+        Данные.Сумма = ?(Условие, "текст", ВнешнийПоставщик());
+        Данные.Сумма = ?(Условие, "текст", Истина);
+        Данные.Сумма = ?(Условие, 10, "текст");
+      КонецПроцедуры
+      """, context);
+
+    assertThat(getDiagnostics(document))
+      .extracting(Diagnostic::getRange, diagnostic -> DiagnosticMessage.getStringValue(diagnostic.getMessage()))
+      .containsExactly(tuple(Ranges.create(5, 17, 5, 44),
+        "Присвойте полю «Сумма» значение объявленного типа"));
+  }
+
+  @Test
   void doesNotTreatInferredKeysAsAnExplicitContract() {
     var document = TestUtils.getDocumentContext("""
       Процедура Проверить()

@@ -42,6 +42,7 @@ import com.github._1c_syntax.bsl.languageserver.utils.expressiontree.BslOperator
 import com.github._1c_syntax.bsl.languageserver.utils.expressiontree.ExpressionTreeBuildingVisitor;
 import com.github._1c_syntax.bsl.languageserver.utils.expressiontree.MethodCallNode;
 import com.github._1c_syntax.bsl.languageserver.utils.expressiontree.TerminalSymbolNode;
+import com.github._1c_syntax.bsl.languageserver.utils.expressiontree.TernaryOperatorNode;
 import com.github._1c_syntax.bsl.parser.BSLParser;
 import lombok.RequiredArgsConstructor;
 import org.antlr.v4.runtime.ParserRuleContext;
@@ -105,15 +106,24 @@ public class DeclaredTypeMismatchDiagnostic extends AbstractVisitorDiagnostic {
     if (field.isEmpty() || field.refs().stream().anyMatch(this::isUncertain)) {
       return;
     }
-    var assigned = inferencer.infer(value, documentContext);
-    if (!assigned.isEmpty() && assigned.refs().stream()
-      .noneMatch(type -> isUncertain(type) || field.refs().contains(type))) {
+    var assigned = knownValueTypes(value);
+    if (!assigned.isEmpty() && assigned.refs().stream().noneMatch(field.refs()::contains)) {
       if (value.getRepresentingAst() instanceof ParserRuleContext valueNode) {
         diagnosticStorage.addDiagnostic(valueNode, info.getMessage(key));
       } else if (value.getRepresentingAst() instanceof TerminalNode terminal) {
         diagnosticStorage.addDiagnostic(terminal, info.getMessage(key));
       }
     }
+  }
+
+  private TypeSet knownValueTypes(BslExpression value) {
+    if (value instanceof TernaryOperatorNode conditional) {
+      var onTrue = knownValueTypes(conditional.getTruePart());
+      var onFalse = knownValueTypes(conditional.getFalsePart());
+      return onTrue.isEmpty() || onFalse.isEmpty() ? TypeSet.EMPTY : onTrue.union(onFalse);
+    }
+    var types = inferencer.infer(value, documentContext);
+    return types.refs().stream().anyMatch(this::isUncertain) ? TypeSet.EMPTY : types;
   }
 
   private TypeSet declaredTypes(ParserRuleContext statement, String name) {

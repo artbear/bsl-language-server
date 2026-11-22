@@ -23,3 +23,5 @@ unverified.
 For a local variable with fields, use a See reference to a function whose
 return description lists those fields. The parser preserves fields in
 method parameter and return descriptions.
+
+For a conditional expression, every possible branch must have a known type.
