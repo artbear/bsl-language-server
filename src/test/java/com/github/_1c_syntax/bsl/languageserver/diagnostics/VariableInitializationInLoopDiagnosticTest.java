@@ -91,6 +91,41 @@ class VariableInitializationInLoopDiagnosticTest
   }
 
   @Test
+  void initializesTheNumericCounterEvenWithoutEnteringTheBody() {
+    var document = TestUtils.getDocumentContext("""
+      Процедура Проверить(Коллекция)
+        Для Каждого Элемент Из Коллекция Цикл
+          Показать(Элемент);
+        КонецЦикла;
+        Для Элемент = 1 По 1 Цикл
+          Показать(Элемент);
+        КонецЦикла;
+        Показать(Элемент);
+      КонецПроцедуры
+      """, context);
+
+    assertThat(getDiagnostics(document)).isEmpty();
+  }
+
+  @Test
+  void checksTheNumericInitializerBeforeInitializingTheCounter() {
+    var document = TestUtils.getDocumentContext("""
+      Процедура Проверить(Коллекция)
+        Для Каждого Элемент Из Коллекция Цикл
+          Показать(Элемент);
+        КонецЦикла;
+        Для Элемент = Элемент По 1 Цикл
+          Показать(Элемент);
+        КонецЦикла;
+        Показать(Элемент);
+      КонецПроцедуры
+      """, context);
+
+    assertThat(getDiagnostics(document)).extracting(Diagnostic::getRange)
+      .containsExactly(Ranges.create(4, 16, 4, 23));
+  }
+
+  @Test
   void acceptsAllBranchesInitializingAndReadsContainedInLoops() {
     var document = TestUtils.getDocumentContext("""
       Процедура Проверить(Коллекция, Условие)

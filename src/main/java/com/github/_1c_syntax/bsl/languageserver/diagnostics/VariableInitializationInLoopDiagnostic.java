@@ -28,6 +28,7 @@ import com.github._1c_syntax.bsl.languageserver.cfg.CfgVertex;
 import com.github._1c_syntax.bsl.languageserver.cfg.ConditionalVertex;
 import com.github._1c_syntax.bsl.languageserver.cfg.ControlFlowGraph;
 import com.github._1c_syntax.bsl.languageserver.cfg.ControlFlowGraphIndex;
+import com.github._1c_syntax.bsl.languageserver.cfg.ForLoopVertex;
 import com.github._1c_syntax.bsl.languageserver.cfg.ForeachLoopVertex;
 import com.github._1c_syntax.bsl.languageserver.cfg.WhileLoopVertex;
 import com.github._1c_syntax.bsl.languageserver.context.symbol.VariableSymbol;
@@ -85,6 +86,11 @@ public class VariableInitializationInLoopDiagnostic extends AbstractVisitorDiagn
         var header = foreach.getLoopHeader();
         if (header.IDENTIFIER() != null) {
           recordWrite(header, header.IDENTIFIER(), List.of(Ranges.create(header)), assignments);
+        }
+      } else if (vertex instanceof ForLoopVertex loop) {
+        var header = loop.getLoopHeader();
+        if (header.IDENTIFIER() != null && !header.expression().isEmpty()) {
+          recordWrite(header, header.IDENTIFIER(), conditionalRegions(header), assignments);
         }
       }
     }
@@ -168,6 +174,18 @@ public class VariableInitializationInLoopDiagnostic extends AbstractVisitorDiagn
       collectReads(loop.getExpression(), reads, uninitializedReads);
     } else if (vertex instanceof ForeachLoopVertex foreach) {
       collectReads(foreach.getLoopHeader().expression(), reads, uninitializedReads);
+    } else if (vertex instanceof ForLoopVertex loop) {
+      var header = loop.getLoopHeader();
+      var bounds = header.expression();
+      if (!bounds.isEmpty()) {
+        collectReads(bounds.getFirst(), reads, uninitializedReads);
+        if (writes.contains(header)) {
+          return false;
+        }
+        if (bounds.size() > 1) {
+          collectReads(bounds.get(1), reads, uninitializedReads);
+        }
+      }
     }
     return true;
   }
