@@ -19,3 +19,6 @@ Data = LoadData(); // Structure
 ```
 
 See the [strict typing recommendation](https://github.com/1C-Company/v8-code-style/blob/c3d043dbd72e82301c99ac29a2743dcc22507cc1/docs/checks/code_typification.md).
+
+An explicit Arbitrary declaration expresses an intentionally dynamic contract.
+Inferred Arbitrary without a declaration leaves the value type unknown.

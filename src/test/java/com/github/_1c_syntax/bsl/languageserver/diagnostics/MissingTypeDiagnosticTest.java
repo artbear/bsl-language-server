@@ -23,15 +23,29 @@ package com.github._1c_syntax.bsl.languageserver.diagnostics;
 
 import com.github._1c_syntax.bsl.languageserver.configuration.diagnostics.Mode;
 import com.github._1c_syntax.bsl.languageserver.diagnostics.metadata.DiagnosticMessage;
+import com.github._1c_syntax.bsl.languageserver.types.TypeService;
+import com.github._1c_syntax.bsl.languageserver.types.model.TypeRef;
 import com.github._1c_syntax.bsl.languageserver.util.TestUtils;
 import com.github._1c_syntax.bsl.languageserver.utils.Ranges;
 import org.eclipse.lsp4j.Diagnostic;
+import org.eclipse.lsp4j.Position;
+import org.eclipse.lsp4j.jsonrpc.messages.Either;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+
+import java.nio.file.Path;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.tuple;
 
 class MissingTypeDiagnosticTest extends AbstractDiagnosticTest<MissingTypeDiagnostic> {
+
+  @Autowired
+  private DefaultDiagnosticComputer diagnosticComputer;
+
+  @Autowired
+  private TypeService typeService;
 
   @Test
   void checksTheFirstWriteInAMarkedModule() {
@@ -51,6 +65,58 @@ class MissingTypeDiagnosticTest extends AbstractDiagnosticTest<MissingTypeDiagno
     assertThat(getDiagnostics(document))
       .extracting(Diagnostic::getRange, diagnostic -> DiagnosticMessage.getStringValue(diagnostic.getMessage()))
       .containsExactly(tuple(Ranges.create(4, 2, 4, 8), "Объявите тип переменной «Данные» при инициализации"));
+  }
+
+  @Test
+  void distinguishesInferredAnyFromAnExplicitDeclaration() {
+    initServerContext();
+    var document = TestUtils.getDocumentContext("""
+      //@strict-types
+      // Параметры:
+      //  Вход - Произвольный
+      //  Адрес - Строка
+      Процедура Проверить(Вход, Адрес)
+        Данные = Вход;
+        ИзХранилища = ПолучитьИзВременногоХранилища(Адрес);
+        Описанные = Вход; // Произвольный
+      КонецПроцедуры
+      """, context);
+
+    assertThat(typeService.expressionTypesAt(document, new Position(5, 11)).refs()).containsExactly(TypeRef.ANY);
+    assertThat(typeService.expressionTypesAt(document, new Position(6, 17)).refs()).doesNotContain(TypeRef.ANY);
+    assertThat(getDiagnostics(document))
+      .extracting(Diagnostic::getRange, diagnostic -> DiagnosticMessage.getStringValue(diagnostic.getMessage()))
+      .containsExactly(
+        tuple(Ranges.create(5, 2, 5, 8), "Объявите тип переменной «Данные» при инициализации"),
+        tuple(Ranges.create(6, 2, 6, 13), "Объявите тип переменной «ИзХранилища» при инициализации"));
+  }
+
+  @Test
+  void honorsOnModeOverridesInTheDiagnosticComputer() {
+    initServerContext();
+    var source = """
+      Процедура Проверить()
+        Данные = НеизвестнаяФункция();
+      КонецПроцедуры
+      """;
+    var options = context.getLanguageServerConfiguration().getDiagnosticsOptions();
+    var root = Path.of(context.getWorkspaceUri());
+    var previous = options.getParameters();
+    try {
+      options.setParameters(Map.of("MissingType", Either.forLeft(true)));
+      var enabled = TestUtils.getDocumentContext(root.resolve("Enabled.bsl").toUri(), source, context);
+      assertThat(diagnosticComputer.compute(enabled))
+        .filteredOn(diagnostic -> "MissingType".equals(diagnostic.getCode().getLeft()))
+        .extracting(Diagnostic::getRange).containsExactly(Ranges.create(1, 2, 1, 8));
+
+      options.setParameters(Map.of("MissingType", Either.forLeft(false)));
+      var disabled = TestUtils.getDocumentContext(root.resolve("Disabled.bsl").toUri(),
+        "//@strict-types\n" + source, context);
+      assertThat(diagnosticComputer.compute(disabled))
+        .filteredOn(diagnostic -> "MissingType".equals(diagnostic.getCode().getLeft())).isEmpty();
+    } finally {
+      options.setParameters(previous);
+    }
   }
 
   @Test

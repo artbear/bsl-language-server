@@ -93,7 +93,7 @@ public class MissingTypeDiagnostic extends AbstractVisitorDiagnostic {
     var value = ExpressionTreeBuildingVisitor.buildExpressionTree(ctx.expression());
     if (value != null && !hasType(commentTypes.typesOf(variable))
       && !hasType(commentTypes.ofAssignment(documentContext, ctx))
-      && !hasType(inferencer.infer(value, documentContext))) {
+      && !hasConcreteType(inferencer.infer(value, documentContext))) {
       diagnosticStorage.addDiagnostic(name, info.getMessage(name.getText()));
     }
     return ctx;
@@ -104,6 +104,10 @@ public class MissingTypeDiagnostic extends AbstractVisitorDiagnostic {
       .takeWhile(token -> token.getChannel() != Token.DEFAULT_CHANNEL && token.getType() != BSLLexer.HASH)
       .anyMatch(token -> token.getType() == BSLLexer.LINE_COMMENT
         && token.getText().substring(2).strip().equalsIgnoreCase("@strict-types"));
+  }
+
+  private static boolean hasConcreteType(TypeSet types) {
+    return types.refs().stream().anyMatch(type -> !type.equals(TypeRef.UNKNOWN) && !type.equals(TypeRef.ANY));
   }
 
   private static boolean hasType(TypeSet types) {
