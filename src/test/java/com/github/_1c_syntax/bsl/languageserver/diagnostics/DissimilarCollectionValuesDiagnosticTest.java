@@ -77,6 +77,22 @@ class DissimilarCollectionValuesDiagnosticTest extends AbstractDiagnosticTest<Di
   }
 
   @Test
+  void doesNotJoinAcrossTheLeadingPreprocessorBranchBeforeMethods() {
+    var document = TestUtils.getDocumentContext("""
+      #Если Сервер Тогда
+      Данные = Новый Массив;
+      Данные.Добавить(10);
+      #КонецЕсли
+      Данные.Добавить("после");
+
+      Процедура Проверить()
+      КонецПроцедуры
+      """, context);
+
+    assertThat(getDiagnostics(document)).isEmpty();
+  }
+
+  @Test
   void retainsTheDefiniteTypeAcrossAUnionValuedAddition() {
     var document = TestUtils.getDocumentContext("""
       Процедура Проверить(Условие)

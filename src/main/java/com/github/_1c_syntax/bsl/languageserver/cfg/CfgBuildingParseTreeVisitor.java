@@ -76,8 +76,9 @@ public class CfgBuildingParseTreeVisitor extends BSLParserBaseVisitor<ParseTree>
       // Если это тело модуля, то самую первую инструкцию препроцессора сожрет грамматика file
       // надо ее тоже посетить принудительно.
       var parent = block.getParent();
-      if (parent instanceof BSLParser.FileCodeBlockContext fileBlock) {
-        var probablyPreprocessor = Trees.getPreviousNode(fileBlock.getParent(), fileBlock,
+      if (parent instanceof BSLParser.FileCodeBlockContext
+        || parent instanceof BSLParser.FileCodeBlockBeforeSubContext) {
+        var probablyPreprocessor = Trees.getPreviousNode(parent.getParent(), parent,
           BSLParser.RULE_preprocessor);
 
         // Флаг top-level препроцессора должен взводиться только для #Если, который грамматика file
