@@ -84,6 +84,33 @@ class ArbitraryFormParameterDiagnosticTest extends AbstractDiagnosticTest<Arbitr
   }
 
   @Test
+  void reportsPlatformUsageInClientContextsNotCoveredByTheLocalDeclaration() {
+    initServerContext(TestUtils.PATH_TO_METADATA);
+    var form = Path.of(TestUtils.PATH_TO_METADATA,
+      "Documents/Документ1/Forms/ФормаДокумента/Ext/Form/Module.bsl").toAbsolutePath();
+    var document = TestUtils.getDocumentContext(form.toUri(), """
+      #Если ТонкийКлиент Тогда
+      &НаКлиенте
+      Процедура ОткрытьФорму(Имя, ПараметрыОткрытия)
+      КонецПроцедуры
+      #КонецЕсли
+
+      &НаКлиенте
+      Процедура Проверить()
+        Данные = Новый Структура("Число", 10);
+        ПараметрыОткрытия = Новый Структура("НачальныеДанные", Данные);
+        ОткрытьФорму("Документ.Документ1.Форма.ФормаДокумента", ПараметрыОткрытия);
+        #Если ТонкийКлиент Тогда
+        ОткрытьФорму("Документ.Документ1.Форма.ФормаДокумента", ПараметрыОткрытия);
+        #КонецЕсли
+      КонецПроцедуры
+      """, context);
+
+    assertThat(getDiagnostics(document)).extracting(Diagnostic::getRange)
+      .containsExactly(Ranges.create(10, 58, 10, 75));
+  }
+
+  @Test
   void ignoresAUserMethodNamedLikeThePlatformMethod() {
     initServerContext(TestUtils.PATH_TO_METADATA);
     var document = TestUtils.getDocumentContext("""

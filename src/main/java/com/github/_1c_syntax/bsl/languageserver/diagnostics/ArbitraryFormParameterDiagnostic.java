@@ -21,6 +21,7 @@
  */
 package com.github._1c_syntax.bsl.languageserver.diagnostics;
 
+import com.github._1c_syntax.bsl.languageserver.context.compilation.ExecutionContext;
 import com.github._1c_syntax.bsl.languageserver.diagnostics.metadata.DiagnosticMetadata;
 import com.github._1c_syntax.bsl.languageserver.diagnostics.metadata.DiagnosticScope;
 import com.github._1c_syntax.bsl.languageserver.diagnostics.metadata.DiagnosticSeverity;
@@ -43,7 +44,6 @@ import com.github._1c_syntax.bsl.types.MdoReference;
 import lombok.RequiredArgsConstructor;
 import org.antlr.v4.runtime.tree.ParseTree;
 
-import java.util.Collections;
 import java.util.Optional;
 
 @DiagnosticMetadata(
@@ -66,7 +66,7 @@ public class ArbitraryFormParameterDiagnostic extends AbstractVisitorDiagnostic 
   public ParseTree visitGlobalMethodCall(BSLParser.GlobalMethodCallContext ctx) {
     var methodName = ctx.methodName().getText();
     if ((!methodName.equalsIgnoreCase("ОткрытьФорму") && !methodName.equalsIgnoreCase("OpenForm"))
-      || shadowsPlatformMethod(ctx, methodName)) {
+      || shadowsPlatformMethodInAllCallContexts(ctx, methodName)) {
       return super.visitGlobalMethodCall(ctx);
     }
     var args = ctx.doCall().callParamList().callParam();
@@ -88,7 +88,7 @@ public class ArbitraryFormParameterDiagnostic extends AbstractVisitorDiagnostic 
     return super.visitGlobalMethodCall(ctx);
   }
 
-  private boolean shadowsPlatformMethod(BSLParser.GlobalMethodCallContext call, String name) {
+  private boolean shadowsPlatformMethodInAllCallContexts(BSLParser.GlobalMethodCallContext call, String name) {
     var symbols = documentContext.getSymbolTree();
     if (symbols.getMethodSymbol(name).isEmpty()) {
       return false;
@@ -96,14 +96,19 @@ public class ArbitraryFormParameterDiagnostic extends AbstractVisitorDiagnostic 
     var callingContexts = contexts.narrowedContextsAt(documentContext, call, Positions.create(call))
       .or(() -> contexts.possibleContexts(documentContext, call))
       .orElseGet(() -> contexts.supportedContexts(documentContext));
-    if (callingContexts.isEmpty()) {
-      return true;
-    }
-    return symbols.getMethods().stream().filter(method -> method.getName().equalsIgnoreCase(name)).anyMatch(method -> {
+    var platformContexts = ExecutionContext.copyOf(callingContexts);
+    for (var method : symbols.getMethods()) {
+      if (!method.getName().equalsIgnoreCase(name)) {
+        continue;
+      }
       var declaration = symbols.getMethodPreprocessorContexts(method);
       // Неизвестное условие оставляет возможность видимости пользовательского метода.
-      return declaration == null || !Collections.disjoint(callingContexts, declaration);
-    });
+      if (declaration == null) {
+        return true;
+      }
+      platformContexts.removeAll(declaration);
+    }
+    return platformContexts.isEmpty();
   }
 
   private Optional<Form> managedForm(TypeRef ref) {
