@@ -115,8 +115,6 @@ public class DissimilarCollectionValuesDiagnostic extends AbstractVisitorDiagnos
         if (types.size() == 1) {
           known.add(types.iterator().next());
         }
-      } else {
-        known.clear();
       }
     }
   }

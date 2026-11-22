@@ -108,6 +108,25 @@ class DissimilarCollectionValuesDiagnosticTest extends AbstractDiagnosticTest<Di
   }
 
   @Test
+  void keepsKnownElementTypesAcrossAnUndefinedAddition() {
+    var document = TestUtils.getDocumentContext("""
+      Процедура Проверить()
+        Данные = Новый Массив;
+        Данные.Добавить(10);
+        Данные.Добавить(Неопределено);
+        Данные.Добавить("текст");
+        Другие = Новый Массив;
+        Другие.Добавить(10);
+        Другие.Добавить(Неопределено);
+        Другие.Добавить(20);
+      КонецПроцедуры
+      """, context);
+
+    assertThat(getDiagnostics(document)).extracting(Diagnostic::getRange)
+      .containsExactly(Ranges.create(4, 18, 4, 25));
+  }
+
+  @Test
   void keepsSeparateInstancesAndBranchesApart() {
     var document = TestUtils.getDocumentContext("""
       Процедура Проверить(Условие)
