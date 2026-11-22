@@ -56,6 +56,41 @@ class VariableInitializationInLoopDiagnosticTest
   }
 
   @Test
+  void initializesTheForeachVariableOnlyOnTheBodyEdge() {
+    var document = TestUtils.getDocumentContext("""
+      Процедура Проверить(Коллекция, Условие)
+        Для Каждого Элемент Из Коллекция Цикл
+          Если Условие Тогда
+            Элемент = 10;
+          КонецЕсли;
+          Показать(Элемент);
+        КонецЦикла;
+        Показать(Элемент);
+      КонецПроцедуры
+      """, context);
+
+    assertThat(getDiagnostics(document)).extracting(Diagnostic::getRange)
+      .containsExactly(Ranges.create(7, 11, 7, 18));
+  }
+
+  @Test
+  void checksUninitializedReadsInWhileConditions() {
+    var document = TestUtils.getDocumentContext("""
+      Процедура Проверить(Условие)
+        Если Условие Тогда
+          Значение = 10;
+        КонецЕсли;
+        Пока Значение <> 0 Цикл
+          Прервать;
+        КонецЦикла;
+      КонецПроцедуры
+      """, context);
+
+    assertThat(getDiagnostics(document)).extracting(Diagnostic::getRange)
+      .containsExactly(Ranges.create(4, 7, 4, 15));
+  }
+
+  @Test
   void acceptsAllBranchesInitializingAndReadsContainedInLoops() {
     var document = TestUtils.getDocumentContext("""
       Процедура Проверить(Коллекция, Условие)

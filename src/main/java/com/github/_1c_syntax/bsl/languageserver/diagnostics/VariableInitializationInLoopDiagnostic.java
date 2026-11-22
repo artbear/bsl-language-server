@@ -23,10 +23,13 @@ package com.github._1c_syntax.bsl.languageserver.diagnostics;
 
 import com.github._1c_syntax.bsl.languageserver.cfg.BasicBlockVertex;
 import com.github._1c_syntax.bsl.languageserver.cfg.CfgBuildOptions;
+import com.github._1c_syntax.bsl.languageserver.cfg.CfgEdgeType;
 import com.github._1c_syntax.bsl.languageserver.cfg.CfgVertex;
 import com.github._1c_syntax.bsl.languageserver.cfg.ConditionalVertex;
 import com.github._1c_syntax.bsl.languageserver.cfg.ControlFlowGraph;
 import com.github._1c_syntax.bsl.languageserver.cfg.ControlFlowGraphIndex;
+import com.github._1c_syntax.bsl.languageserver.cfg.ForeachLoopVertex;
+import com.github._1c_syntax.bsl.languageserver.cfg.WhileLoopVertex;
 import com.github._1c_syntax.bsl.languageserver.context.symbol.VariableSymbol;
 import com.github._1c_syntax.bsl.languageserver.context.symbol.variable.VariableKind;
 import com.github._1c_syntax.bsl.languageserver.diagnostics.metadata.DiagnosticMetadata;
@@ -42,6 +45,7 @@ import com.github._1c_syntax.bsl.parser.BSLParser;
 import lombok.RequiredArgsConstructor;
 import org.antlr.v4.runtime.ParserRuleContext;
 import org.antlr.v4.runtime.tree.ParseTree;
+import org.antlr.v4.runtime.tree.TerminalNode;
 import org.eclipse.lsp4j.Range;
 
 import java.util.ArrayDeque;
@@ -77,6 +81,11 @@ public class VariableInitializationInLoopDiagnostic extends AbstractVisitorDiagn
             recordAssignment(assignment, assignments);
           }
         }
+      } else if (vertex instanceof ForeachLoopVertex foreach) {
+        var header = foreach.getLoopHeader();
+        if (header.IDENTIFIER() != null) {
+          recordWrite(header, header.IDENTIFIER(), List.of(Ranges.create(header)), assignments);
+        }
       }
     }
     assignments.forEach((variable, writes) -> checkVariable(graph, variable, writes));
@@ -89,10 +98,15 @@ public class VariableInitializationInLoopDiagnostic extends AbstractVisitorDiagn
     if (target == null || target.acceptor() != null || target.IDENTIFIER() == null) {
       return;
     }
-    documentContext.getSymbolTree().getVariableSymbolInScope(target, target.IDENTIFIER().getText())
+    recordWrite(assignment, target.IDENTIFIER(), conditionalRegions(assignment), assignments);
+  }
+
+  private void recordWrite(ParserRuleContext statement, TerminalNode name, List<Range> regions,
+                           Map<VariableSymbol, Map<ParserRuleContext, List<Range>>> assignments) {
+    documentContext.getSymbolTree().getVariableSymbolInScope(statement, name.getText())
       .filter(variable -> variable.getKind() == VariableKind.DYNAMIC || variable.getKind() == VariableKind.LOCAL)
       .ifPresent(variable -> assignments.computeIfAbsent(variable, ignored -> new HashMap<>())
-        .put(assignment, conditionalRegions(assignment)));
+        .put(statement, regions));
   }
 
   private static List<Range> conditionalRegions(ParserRuleContext statement) {
@@ -129,7 +143,10 @@ public class VariableInitializationInLoopDiagnostic extends AbstractVisitorDiagn
     while (!pending.isEmpty()) {
       var vertex = pending.removeFirst();
       if (visited.add(vertex) && canLeaveUninitialized(vertex, writes.keySet(), reads, uninitializedReads)) {
-        graph.outgoingEdgesOf(vertex).stream().map(graph::getEdgeTarget).forEach(pending::add);
+        var bindsIterator = vertex instanceof ForeachLoopVertex foreach && writes.containsKey(foreach.getLoopHeader());
+        graph.outgoingEdgesOf(vertex).stream()
+          .filter(edge -> !bindsIterator || edge.getType() != CfgEdgeType.TRUE_BRANCH)
+          .map(graph::getEdgeTarget).forEach(pending::add);
       }
     }
     uninitializedReads.stream().min(Ranges::compare)
@@ -147,6 +164,10 @@ public class VariableInitializationInLoopDiagnostic extends AbstractVisitorDiagn
       }
     } else if (vertex instanceof ConditionalVertex condition) {
       collectReads(condition.getExpression(), reads, uninitializedReads);
+    } else if (vertex instanceof WhileLoopVertex loop) {
+      collectReads(loop.getExpression(), reads, uninitializedReads);
+    } else if (vertex instanceof ForeachLoopVertex foreach) {
+      collectReads(foreach.getLoopHeader().expression(), reads, uninitializedReads);
     }
     return true;
   }
