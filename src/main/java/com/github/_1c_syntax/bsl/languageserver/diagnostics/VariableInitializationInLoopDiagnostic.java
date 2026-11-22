@@ -30,6 +30,7 @@ import com.github._1c_syntax.bsl.languageserver.cfg.ControlFlowGraph;
 import com.github._1c_syntax.bsl.languageserver.cfg.ControlFlowGraphIndex;
 import com.github._1c_syntax.bsl.languageserver.cfg.ForLoopVertex;
 import com.github._1c_syntax.bsl.languageserver.cfg.ForeachLoopVertex;
+import com.github._1c_syntax.bsl.languageserver.cfg.TryExceptVertex;
 import com.github._1c_syntax.bsl.languageserver.cfg.WhileLoopVertex;
 import com.github._1c_syntax.bsl.languageserver.context.symbol.VariableSymbol;
 import com.github._1c_syntax.bsl.languageserver.context.symbol.variable.VariableKind;
@@ -42,6 +43,9 @@ import com.github._1c_syntax.bsl.languageserver.references.ReferenceIndex;
 import com.github._1c_syntax.bsl.languageserver.references.model.OccurrenceType;
 import com.github._1c_syntax.bsl.languageserver.references.model.Reference;
 import com.github._1c_syntax.bsl.languageserver.utils.Ranges;
+import com.github._1c_syntax.bsl.languageserver.utils.expressiontree.ExpressionNodeType;
+import com.github._1c_syntax.bsl.languageserver.utils.expressiontree.ExpressionTreeBuildingVisitor;
+import com.github._1c_syntax.bsl.languageserver.utils.expressiontree.TerminalSymbolNode;
 import com.github._1c_syntax.bsl.parser.BSLParser;
 import lombok.RequiredArgsConstructor;
 import org.antlr.v4.runtime.ParserRuleContext;
@@ -149,14 +153,36 @@ public class VariableInitializationInLoopDiagnostic extends AbstractVisitorDiagn
     while (!pending.isEmpty()) {
       var vertex = pending.removeFirst();
       if (visited.add(vertex) && canLeaveUninitialized(vertex, writes.keySet(), reads, uninitializedReads)) {
-        var bindsIterator = vertex instanceof ForeachLoopVertex foreach && writes.containsKey(foreach.getLoopHeader());
+        var initializesIterator = vertex instanceof ForeachLoopVertex foreach
+          && writes.containsKey(foreach.getLoopHeader());
+        var initializesInTry = startsTryWithLiteralWrite(graph, vertex, writes.keySet());
         graph.outgoingEdgesOf(vertex).stream()
-          .filter(edge -> !bindsIterator || edge.getType() != CfgEdgeType.TRUE_BRANCH)
+          .filter(edge -> !initializesIterator || edge.getType() != CfgEdgeType.TRUE_BRANCH)
+          .filter(edge -> !initializesInTry || edge.getType() != CfgEdgeType.FALSE_BRANCH)
           .map(graph::getEdgeTarget).forEach(pending::add);
       }
     }
     uninitializedReads.stream().min(Ranges::compare)
       .ifPresent(read -> diagnosticStorage.addDiagnostic(read, info.getMessage(variable.getName())));
+  }
+
+  private static boolean startsTryWithLiteralWrite(ControlFlowGraph graph, CfgVertex vertex,
+                                                   Set<ParserRuleContext> writes) {
+    if (!(vertex instanceof TryExceptVertex)) {
+      return false;
+    }
+    return graph.outgoingEdgesOf(vertex).stream()
+      .filter(edge -> edge.getType() == CfgEdgeType.TRUE_BRANCH)
+      .map(graph::getEdgeTarget)
+      .filter(BasicBlockVertex.class::isInstance)
+      .map(BasicBlockVertex.class::cast)
+      .map(BasicBlockVertex::statements)
+      .filter(statements -> !statements.isEmpty())
+      .map(List::getFirst)
+      .filter(writes::contains)
+      .anyMatch(statement -> statement instanceof BSLParser.AssignmentContext assignment
+        && ExpressionTreeBuildingVisitor.buildExpressionTree(assignment.expression()) instanceof TerminalSymbolNode literal
+        && literal.getNodeType() == ExpressionNodeType.LITERAL);
   }
 
   private static boolean canLeaveUninitialized(CfgVertex vertex, Set<ParserRuleContext> writes, List<Range> reads,

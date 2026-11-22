@@ -126,6 +126,44 @@ class VariableInitializationInLoopDiagnosticTest
   }
 
   @Test
+  void keepsLiteralInitializationBeforeAnException() {
+    var document = TestUtils.getDocumentContext("""
+      Процедура Проверить(Условие)
+        Если Условие Тогда
+          Значение = 1;
+        КонецЕсли;
+        Попытка
+          Значение = 2;
+          ВызватьИсключение "Ошибка";
+        Исключение
+          Показать(Значение);
+        КонецПопытки;
+      КонецПроцедуры
+      """, context);
+
+    assertThat(getDiagnostics(document)).isEmpty();
+  }
+
+  @Test
+  void reportsWhenTheInitializerCanFailBeforeTheAssignment() {
+    var document = TestUtils.getDocumentContext("""
+      Процедура Проверить(Условие)
+        Если Условие Тогда
+          Значение = 1;
+        КонецЕсли;
+        Попытка
+          Значение = ВнешнийПоставщик();
+        Исключение
+          Показать(Значение);
+        КонецПопытки;
+      КонецПроцедуры
+      """, context);
+
+    assertThat(getDiagnostics(document)).extracting(Diagnostic::getRange)
+      .containsExactly(Ranges.create(7, 13, 7, 21));
+  }
+
+  @Test
   void acceptsAllBranchesInitializingAndReadsContainedInLoops() {
     var document = TestUtils.getDocumentContext("""
       Процедура Проверить(Коллекция, Условие)
