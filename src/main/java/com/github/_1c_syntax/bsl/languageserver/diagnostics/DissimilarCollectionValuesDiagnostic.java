@@ -65,13 +65,32 @@ public class DissimilarCollectionValuesDiagnostic extends AbstractVisitorDiagnos
 
   @Override
   public ParseTree visitSubCodeBlock(BSLParser.SubCodeBlockContext ctx) {
-    var graph = graphs.graphOf(documentContext, ctx.codeBlock(), CfgBuildOptions.defaults());
+    checkBody(ctx.codeBlock());
+    return ctx;
+  }
+
+  @Override
+  public ParseTree visitFileCodeBlockBeforeSub(BSLParser.FileCodeBlockBeforeSubContext ctx) {
+    checkBody(ctx.codeBlock());
+    return ctx;
+  }
+
+  @Override
+  public ParseTree visitFileCodeBlock(BSLParser.FileCodeBlockContext ctx) {
+    checkBody(ctx.codeBlock());
+    return ctx;
+  }
+
+  private void checkBody(BSLParser.@Nullable CodeBlockContext body) {
+    if (body == null) {
+      return;
+    }
+    var graph = graphs.graphOf(documentContext, body, CfgBuildOptions.defaults());
     for (var vertex : graph.vertexSet()) {
       if (vertex instanceof BasicBlockVertex block) {
         checkBlock(block);
       }
     }
-    return ctx;
   }
 
   private void checkBlock(BasicBlockVertex block) {
@@ -93,7 +112,9 @@ public class DissimilarCollectionValuesDiagnostic extends AbstractVisitorDiagnos
         if (!known.isEmpty() && types.stream().noneMatch(known::contains)) {
           diagnosticStorage.addDiagnostic(Ranges.create(addition.location()), info.getMessage(currentReceiver));
         }
-        known.addAll(types);
+        if (types.size() == 1) {
+          known.add(types.iterator().next());
+        }
       } else {
         known.clear();
       }
