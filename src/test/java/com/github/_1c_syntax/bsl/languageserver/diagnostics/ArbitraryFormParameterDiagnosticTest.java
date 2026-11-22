@@ -28,6 +28,8 @@ import com.github._1c_syntax.bsl.languageserver.utils.Ranges;
 import org.eclipse.lsp4j.Diagnostic;
 import org.junit.jupiter.api.Test;
 
+import java.nio.file.Path;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.tuple;
 
@@ -53,6 +55,32 @@ class ArbitraryFormParameterDiagnosticTest extends AbstractDiagnosticTest<Arbitr
       .extracting(Diagnostic::getRange, diagnostic -> DiagnosticMessage.getStringValue(diagnostic.getMessage()))
       .containsExactly(tuple(Ranges.create(4, 58, 4, 75),
         "Опишите поля структуры отдельными параметрами формы вместо «НачальныеДанные»"));
+  }
+
+  @Test
+  void detectsAClientCallWhenTheUserMethodExistsOnlyOnTheServer() {
+    initServerContext(TestUtils.PATH_TO_METADATA);
+    var form = Path.of(TestUtils.PATH_TO_METADATA,
+      "Documents/Документ1/Forms/ФормаДокумента/Ext/Form/Module.bsl").toAbsolutePath();
+    var document = TestUtils.getDocumentContext(form.toUri(), """
+      #Если Сервер Тогда
+      &НаСервере
+      Процедура ОткрытьФорму(Имя, ПараметрыОткрытия)
+      КонецПроцедуры
+      #КонецЕсли
+
+      #Если Клиент Тогда
+      &НаКлиенте
+      Процедура Проверить()
+        Данные = Новый Структура("Число", 10);
+        ПараметрыОткрытия = Новый Структура("НачальныеДанные", Данные);
+        ОткрытьФорму("Документ.Документ1.Форма.ФормаДокумента", ПараметрыОткрытия);
+      КонецПроцедуры
+      #КонецЕсли
+      """, context);
+
+    assertThat(getDiagnostics(document)).extracting(Diagnostic::getRange)
+      .containsExactly(Ranges.create(11, 58, 11, 75));
   }
 
   @Test

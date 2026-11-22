@@ -26,6 +26,7 @@ import com.github._1c_syntax.bsl.languageserver.diagnostics.metadata.DiagnosticS
 import com.github._1c_syntax.bsl.languageserver.diagnostics.metadata.DiagnosticSeverity;
 import com.github._1c_syntax.bsl.languageserver.diagnostics.metadata.DiagnosticTag;
 import com.github._1c_syntax.bsl.languageserver.diagnostics.metadata.DiagnosticType;
+import com.github._1c_syntax.bsl.languageserver.types.compilation.CompilationContextResolver;
 import com.github._1c_syntax.bsl.languageserver.types.inferencer.ExpressionTypeInferencer;
 import com.github._1c_syntax.bsl.languageserver.types.inferencer.OpenDataObjectInference;
 import com.github._1c_syntax.bsl.languageserver.types.model.TypeRef;
@@ -33,6 +34,7 @@ import com.github._1c_syntax.bsl.languageserver.types.model.TypeSet;
 import com.github._1c_syntax.bsl.languageserver.types.registry.FormByNameResolver;
 import com.github._1c_syntax.bsl.languageserver.types.registry.TypeRegistry;
 import com.github._1c_syntax.bsl.languageserver.types.registry.ValueTypes;
+import com.github._1c_syntax.bsl.languageserver.utils.Positions;
 import com.github._1c_syntax.bsl.languageserver.utils.expressiontree.ExpressionTreeBuildingVisitor;
 import com.github._1c_syntax.bsl.parser.BSLParser;
 import com.github._1c_syntax.bsl.mdo.Form;
@@ -41,6 +43,7 @@ import com.github._1c_syntax.bsl.types.MdoReference;
 import lombok.RequiredArgsConstructor;
 import org.antlr.v4.runtime.tree.ParseTree;
 
+import java.util.Collections;
 import java.util.Optional;
 
 @DiagnosticMetadata(
@@ -57,12 +60,13 @@ public class ArbitraryFormParameterDiagnostic extends AbstractVisitorDiagnostic 
   private final ExpressionTypeInferencer inferencer;
   private final FormByNameResolver forms;
   private final TypeRegistry typeRegistry;
+  private final CompilationContextResolver contexts;
 
   @Override
   public ParseTree visitGlobalMethodCall(BSLParser.GlobalMethodCallContext ctx) {
     var methodName = ctx.methodName().getText();
     if ((!methodName.equalsIgnoreCase("ОткрытьФорму") && !methodName.equalsIgnoreCase("OpenForm"))
-      || documentContext.getSymbolTree().getMethodSymbol(methodName).isPresent()) {
+      || shadowsPlatformMethod(ctx, methodName)) {
       return super.visitGlobalMethodCall(ctx);
     }
     var args = ctx.doCall().callParamList().callParam();
@@ -82,6 +86,24 @@ public class ArbitraryFormParameterDiagnostic extends AbstractVisitorDiagnostic 
         .ifPresent(form -> checkParameters(form, args.get(1), inferencer.infer(values, documentContext)));
     }
     return super.visitGlobalMethodCall(ctx);
+  }
+
+  private boolean shadowsPlatformMethod(BSLParser.GlobalMethodCallContext call, String name) {
+    var symbols = documentContext.getSymbolTree();
+    if (symbols.getMethodSymbol(name).isEmpty()) {
+      return false;
+    }
+    var callingContexts = contexts.narrowedContextsAt(documentContext, call, Positions.create(call))
+      .or(() -> contexts.possibleContexts(documentContext, call))
+      .orElseGet(() -> contexts.supportedContexts(documentContext));
+    if (callingContexts.isEmpty()) {
+      return true;
+    }
+    return symbols.getMethods().stream().filter(method -> method.getName().equalsIgnoreCase(name)).anyMatch(method -> {
+      var declaration = symbols.getMethodPreprocessorContexts(method);
+      // Неизвестное условие оставляет возможность видимости пользовательского метода.
+      return declaration == null || !Collections.disjoint(callingContexts, declaration);
+    });
   }
 
   private Optional<Form> managedForm(TypeRef ref) {
