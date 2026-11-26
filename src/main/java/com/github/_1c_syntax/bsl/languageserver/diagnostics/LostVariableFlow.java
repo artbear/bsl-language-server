@@ -47,6 +47,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.TreeMap;
@@ -66,6 +67,7 @@ final class LostVariableFlow {
   private final Map<VariableSymbol, Integer> writes = new HashMap<>();
   private final Map<CfgVertex, List<Operation>> operations = new HashMap<>();
   private final Map<CfgVertex, Set<VariableSymbol>> liveIn = new HashMap<>();
+  private final Map<CfgVertex, Set<VariableSymbol>> nextIteration = new HashMap<>();
   private final Map<BSLParser.TryCodeBlockContext, CfgVertex> handlers = new HashMap<>();
   private final Map<CfgVertex, Set<CfgVertex>> dependents = new HashMap<>();
 
@@ -118,8 +120,10 @@ final class LostVariableFlow {
     while (!pending.isEmpty()) {
       var vertex = pending.removeFirst();
       queued.remove(vertex);
+      var previousIteration = nextIteration.get(vertex);
       var live = transfer(vertex, null);
-      if (!live.equals(liveIn.getOrDefault(vertex, Set.of()))) {
+      if (!live.equals(liveIn.getOrDefault(vertex, Set.of()))
+        || !Objects.equals(previousIteration, nextIteration.get(vertex))) {
         liveIn.put(vertex, live);
         for (var predecessor : dependents.getOrDefault(vertex, Set.of())) {
           if (queued.add(predecessor)) {
@@ -137,7 +141,15 @@ final class LostVariableFlow {
       live.addAll(external);
     }
     for (var edge : graph.outgoingEdgesOf(vertex)) {
-      var successor = liveIn.getOrDefault(graph.getEdgeTarget(edge), Set.of());
+      if (vertex instanceof TryExceptVertex && edge.getType() == CfgEdgeType.FALSE_BRANCH) {
+        // The structural edge identifies the handler. Only a throwing operation transfers control to it.
+        continue;
+      }
+      var target = graph.getEdgeTarget(edge);
+      var repeat = target instanceof ForLoopVertex
+        && (edge.getType() == CfgEdgeType.LOOP_ITERATION || endsWithContinue(vertex));
+      var state = repeat ? nextIteration : liveIn;
+      var successor = state.getOrDefault(target, Set.of());
       if (vertex instanceof ForeachLoopVertex loop && edge.getType() == CfgEdgeType.TRUE_BRANCH) {
         // Entering the body assigns the next item. The loop exit preserves the current value.
         var beforeIteration = new HashSet<>(successor);
@@ -147,10 +159,17 @@ final class LostVariableFlow {
         live.addAll(successor);
       }
     }
+    if (vertex instanceof ForLoopVertex loop) {
+      // The increment on a back edge reads the current counter. First entry only evaluates the bounds.
+      var repeat = new HashSet<>(live);
+      resolve(loop.getLoopHeader().IDENTIFIER()).ifPresent(repeat::add);
+      nextIteration.put(vertex, repeat);
+    }
     for (var op : operations.get(vertex).reversed()) {
-      if (op.variable != null && op.write != null) {
+      if (op.variable != null) {
         var variable = op.variable;
-        if (!live.remove(variable) && report != null && (writes.get(variable) > 1 || read.contains(variable))) {
+        if (!live.remove(variable) && report != null && op.write != null
+          && (writes.get(variable) > 1 || read.contains(variable))) {
           report.accept(op.write, "diagnosticMessage");
         }
       }
@@ -169,6 +188,11 @@ final class LostVariableFlow {
     return live;
   }
 
+  private static boolean endsWithContinue(CfgVertex vertex) {
+    return vertex instanceof BasicBlockVertex block && !block.statements().isEmpty()
+      && block.statements().getLast() instanceof BSLParser.ContinueStatementContext;
+  }
+
   private List<Operation> collect(CfgVertex vertex, BiConsumer<TerminalNode, String> report) {
     return switch (vertex) {
       case BasicBlockVertex block -> block.statements().stream().map(this::operation).toList();
@@ -177,11 +201,14 @@ final class LostVariableFlow {
       case ForLoopVertex loop -> {
         var header = loop.getLoopHeader();
         checkIterator(header, header.IDENTIFIER(), null, report);
-        var bounds = header.expression().stream().map(this::operation).toList();
-        // A numeric loop implicitly reads its counter before incrementing it.
-        if (!bounds.isEmpty()) {
-          resolve(header.IDENTIFIER()).ifPresent(bounds.getFirst().reads::add);
-        }
+        var bounds = new ArrayList<Operation>();
+        header.expression().forEach(expression -> bounds.add(operation(expression)));
+        resolve(header.IDENTIFIER()).filter(this::canCheckWrite).ifPresent(counter -> {
+          var initialize = new Operation();
+          initialize.variable = counter;
+          writes.merge(counter, 1, Integer::sum);
+          bounds.add(initialize);
+        });
         yield bounds;
       }
       case ForeachLoopVertex loop -> {
@@ -259,13 +286,32 @@ final class LostVariableFlow {
     }
     op.visit(ctx);
     read.addAll(op.reads);
-    var protectedBlock = Trees.<BSLParser.TryCodeBlockContext>getAncestorByRuleIndex(ctx, BSLParser.RULE_tryCodeBlock);
-    op.exception = handlers.get(protectedBlock);
-    if (op.exception == null && (op.observesExternal || ctx instanceof BSLParser.AssignmentContext assignment
-      && assignment.expression() != null && assignment.expression().getStart() != assignment.expression().getStop())) {
-      op.exception = graph.getExitPoint();
+    if (canThrow(ctx, op)) {
+      var protectedBlock = Trees.<BSLParser.TryCodeBlockContext>getAncestorByRuleIndex(ctx, BSLParser.RULE_tryCodeBlock);
+      op.exception = handlers.getOrDefault(protectedBlock, graph.getExitPoint());
     }
     return op;
+  }
+
+  private boolean canThrow(ParserRuleContext ctx, Operation op) {
+    return switch (ctx) {
+      case BSLParser.AssignmentContext assignment -> op.variable == null || !safeValue(assignment.expression());
+      case BSLParser.ReturnStatementContext ret -> ret.expression() != null && !safeValue(ret.expression());
+      case BSLParser.BreakStatementContext ignored -> false;
+      case BSLParser.ContinueStatementContext ignored -> false;
+      case BSLParser.GotoStatementContext ignored -> false;
+      default -> true;
+    };
+  }
+
+  private boolean safeValue(BSLParser.@Nullable ExpressionContext expression) {
+    if (expression == null || expression.getChildCount() != 1) {
+      return false;
+    }
+    var member = expression.member(0);
+    return member != null && member.getChildCount() == 1 && member.constValue() != null
+      || expression.getStart() == expression.getStop() && expression.getStart().getType() == BSLParser.IDENTIFIER
+      && resolve(expression.getText()).isPresent();
   }
 
   private boolean canCheckWrite(VariableSymbol variable) {

@@ -29,7 +29,6 @@ import org.eclipse.lsp4j.Diagnostic;
 import org.junit.jupiter.api.Test;
 
 import java.nio.file.Path;
-import java.util.List;
 import java.util.Map;
 
 import static com.github._1c_syntax.bsl.languageserver.util.TestUtils.PATH_TO_METADATA;
@@ -68,10 +67,16 @@ class LostVariableDiagnosticTest extends AbstractDiagnosticTest<LostVariableDiag
 
   @Test
   void controlFlowAndLoopHeaders() {
-    String file = "LostVariableFlow";
-    assertThat(locations(getDiagnostics(file), getText(file))).containsExactlyInAnyOrder(
-      "4:Х", "7:Х", "8:Выход", "11:Локальный", "34:Результат", "52:кОЛЛекция", "63:Сч",
-      "67:ОбщийСчетчик", "70:ОбщийСчетчик", "79:Значение", "85:ITEMS", "130:Элемент", "146:кОЛЛекция");
+    assertThat(getDiagnostics("LostVariableFlow"))
+      .extracting(Diagnostic::getRange, diagnostic -> diagnostic.getMessage().getLeft())
+      .containsExactlyInAnyOrder(
+        assignment(4, 4, "Х"), assignment(7, 4, "Х"), assignment(8, 4, "Выход"), assignment(11, 4, "Локальный"),
+        assignment(34, 4, "Результат"), expected(52, 16, "кОЛЛекция", "collectionIterator"),
+        expected(63, 20, "Сч", "nestedIterator"), expected(67, 16, "ОбщийСчетчик", "moduleIterator"),
+        expected(70, 8, "ОбщийСчетчик", "moduleIterator"), assignment(79, 4, "Значение"),
+        expected(85, 13, "ITEMS", "collectionIterator"), assignment(130, 8, "Элемент"),
+        expected(146, 16, "кОЛЛекция", "collectionIterator"), assignment(166, 4, "Индекс"),
+        assignment(183, 8, "Значение"), assignment(207, 4, "Значение"));
   }
 
   @Test
@@ -85,13 +90,17 @@ class LostVariableDiagnosticTest extends AbstractDiagnosticTest<LostVariableDiag
     var content = getText("LostVariableForm");
     context.rebuildDocument(document, content, 1);
     context.rebuildDocument(catalog, content, 1);
-    assertThat(locations(getDiagnostics(document), content)).containsExactly("13:НовыйИтог");
+    assertThat(getDiagnostics(document)).extracting(Diagnostic::getRange, diagnostic -> diagnostic.getMessage().getLeft())
+      .containsExactly(assignment(13, 4, "НовыйИтог"));
     diagnosticInstance.configure(Map.of("checkFormShadowing", true));
-    assertThat(locations(getDiagnostics(document), content))
-      .containsExactlyInAnyOrder("2:таблицаПодбора", "2:Parameters", "3:Параметры", "13:НовыйИтог");
-    assertThat(locations(getDiagnostics(catalog), content))
-      .containsExactlyInAnyOrder("2:Parameters", "3:Параметры", "11:ТаблицаПодбора",
-        "12:ТаблицаПодбора", "13:НовыйИтог");
+    assertThat(getDiagnostics(document)).extracting(Diagnostic::getRange, diagnostic -> diagnostic.getMessage().getLeft())
+      .containsExactlyInAnyOrder(
+        expected(2, 20, "таблицаПодбора", "formShadow"), expected(2, 36, "Parameters", "formShadow"),
+        expected(3, 10, "Параметры", "formShadow"), assignment(13, 4, "НовыйИтог"));
+    assertThat(getDiagnostics(catalog)).extracting(Diagnostic::getRange, diagnostic -> diagnostic.getMessage().getLeft())
+      .containsExactlyInAnyOrder(
+        expected(2, 36, "Parameters", "formShadow"), expected(3, 10, "Параметры", "formShadow"),
+        assignment(11, 4, "ТаблицаПодбора"), assignment(12, 4, "ТаблицаПодбора"), assignment(13, 4, "НовыйИтог"));
     assertThat(getDiagnostics("LostVariableForm")).noneMatch(d -> d.getRange().getStart().getLine() < 3);
   }
 
@@ -102,16 +111,5 @@ class LostVariableDiagnosticTest extends AbstractDiagnosticTest<LostVariableDiag
   private Tuple expected(int line, int column, String name, String messageKey) {
     return tuple(Ranges.create(line - 1, column, column + name.length()),
       diagnosticInstance.getInfo().getResourceString(messageKey, name));
-  }
-
-  private static List<String> locations(List<Diagnostic> diagnostics, String source) {
-    var lines = source.lines().toList();
-    return diagnostics.stream().map(d -> {
-      var range = d.getRange();
-      var start = range.getStart();
-      assertThat(range.getEnd().getLine()).isEqualTo(start.getLine());
-      return (start.getLine() + 1) + ":" + lines.get(start.getLine())
-        .substring(start.getCharacter(), range.getEnd().getCharacter());
-    }).toList();
   }
 }
