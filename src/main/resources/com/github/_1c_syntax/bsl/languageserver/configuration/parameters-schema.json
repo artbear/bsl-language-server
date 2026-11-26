@@ -1362,6 +1362,16 @@
             "title": "Method parameters description are missing",
             "$id": "#/definitions/MissingParameterDescription"
         },
+        "MissingQueryParameter": {
+            "description": "Missing query parameter",
+            "default": false,
+            "type": [
+                "boolean",
+                "object"
+            ],
+            "title": "Missing query parameter",
+            "$id": "#/definitions/MissingQueryParameter"
+        },
         "MissingReturnedValueDescription": {
             "description": "Function returned values description is missing",
             "default": true,
