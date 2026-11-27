@@ -59,7 +59,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 @CleanupContextBeforeClassAndAfterEachTestMethod
 class SarifReporterTest extends AbstractServerContextAwareTest {
 
-  private static final String SOURCE_DIR = ".";
+  private static final String SOURCE_DIR = "src/test/resources";
 
   @Autowired
   private SarifReporter reporter;
@@ -108,6 +108,9 @@ class SarifReporterTest extends AbstractServerContextAwareTest {
     );
 
     var documentContext = TestUtils.getDocumentContext("");
+    var execution = new org.eclipse.lsp4j.Location(documentContext.getUri().toString(), Ranges.create(4, 0, 4, 7));
+    diagnostic.setRelatedInformation(Collections.singletonList(
+      new org.eclipse.lsp4j.DiagnosticRelatedInformation(execution, "Query execution")));
     FileInfo fileInfo = new FileInfo(SOURCE_DIR, documentContext, Collections.singletonList(diagnostic));
     AnalysisInfo analysisInfo = new AnalysisInfo(LocalDateTime.now(), Collections.singletonList(fileInfo), SOURCE_DIR);
 
@@ -121,6 +124,9 @@ class SarifReporterTest extends AbstractServerContextAwareTest {
     assertThat(report).isNotNull();
 
     var run = report.getRuns().getFirst();
+    assertThat(run.getResults().getFirst().getAnalysisTarget().getUri()).isEqualTo(documentContext.getUri().toString());
+    assertThat(run.getResults().getFirst().getRelatedLocations()).singleElement()
+      .satisfies(location -> assertThat(location.getPhysicalLocation().getRegion().getStartLine()).isEqualTo(5));
 
     assertThat(run.getTool().getDriver().getName()).isEqualTo("BSL Language Server");
     assertThat(run.getTool().getDriver().getRules())

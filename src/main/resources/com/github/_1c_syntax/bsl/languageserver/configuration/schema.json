@@ -317,6 +317,9 @@
                 "MissingParameterDescription": {
                     "$ref": "parameters-schema.json#/definitions/MissingParameterDescription"
                 },
+                "MissingQueryParameter": {
+                    "$ref": "parameters-schema.json#/definitions/MissingQueryParameter"
+                },
                 "MissingReturnedValueDescription": {
                     "$ref": "parameters-schema.json#/definitions/MissingReturnedValueDescription"
                 },

@@ -97,6 +97,7 @@ public class SarifReporter extends AbstractDiagnosticReporter {
   private ReportFile reportFile;
   private JsonGenerator generator;
   private SequenceWriter writer;
+  private Path sourceDirectory;
 
   public SarifReporter(
     ServerContextProvider serverContextProvider,
@@ -116,6 +117,7 @@ public class SarifReporter extends AbstractDiagnosticReporter {
 
   @Override
   public void beginReport(ReportContext context, Path outputDir) {
+    sourceDirectory = Absolute.path(context.sourceDir());
     // Результаты (по одному на диагностику, на крупной конфигурации — миллионы) сериализуются
     // по мере поступления и не удерживаются в памяти. Так исключается построение второго полного
     // графа Result/Location/Region поверх уже вычисленных диагностик — главный источник пикового
@@ -154,7 +156,7 @@ public class SarifReporter extends AbstractDiagnosticReporter {
   @Override
   public void accept(FileInfo fileInfo) {
     // uri вычисляется один раз на файл, а не на каждую диагностику
-    var uri = Absolute.uri(fileInfo.getPath().toUri()).toString();
+    var uri = Absolute.uri(sourceDirectory.resolve(fileInfo.getPath()).normalize().toUri()).toString();
 
     var results = fileInfo.getDiagnostics().stream()
       .map(diagnostic -> createResult(uri, diagnostic))
@@ -278,7 +280,8 @@ public class SarifReporter extends AbstractDiagnosticReporter {
     var relatedLocations = Optional.ofNullable(diagnostic.getRelatedInformation())
       .stream()
       .flatMap(Collection::stream)
-      .skip(1)
+      .filter(related -> !related.getLocation().getRange().equals(diagnostic.getRange())
+        || !related.getLocation().getUri().equals(uri))
       .map(relatedInformation -> createLocation(
         relatedInformation.getMessage(),
         relatedInformation.getLocation().getUri(),
